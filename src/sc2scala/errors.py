@@ -10,6 +10,10 @@ class MatchTimeoutError(EngineError, TimeoutError):
     """A match ran past its real-time limit and a margin, and was stopped."""
 
 
+class MatchStoppedError(EngineError):
+    """A match was stopped while it was played, its runner stopping."""
+
+
 class SignInError(ScalaError):
     """Signing in failed: GitHub refused, or the account cannot be used here."""
 

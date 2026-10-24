@@ -56,16 +56,31 @@ uv run sc2scala ladder show night-league
 
 ## Running matches
 
-A machine with Docker plays the matches the server draws for it, one at a time, once registered as a runner machine
-of yours, which serves every public ladder, or the ladders named:
+A machine with Docker plays the matches the server draws for it once registered as a runner machine of yours, which
+serves every public ladder, or the ladders named:
 
 ```bash
 uv run sc2scala runner register my-desk
 uv run sc2scala runner start
 ```
 
-`runner start` downloads the engine's images first if Docker lacks them, about 11 GB. It keeps bots and maps in
+`runner register` writes the machine's settings to `~/.config/sc2scala/runner.toml`: how many matches it plays at once,
+1 at first, with how many fit this machine in a comment; how many GiB of bots and maps it keeps, 20; and the weekly
+windows in which it plays, at any hour at first, with an example of nights and weekends. `runner start` reads them,
+downloads the engine's images first if Docker lacks them, about 11 GB, and plays. It keeps bots and maps in
 `~/.cache/sc2scala`, plays each match in `~/.local/share/sc2scala/work`, and reports its result, replay and logs.
+`sc2scala runner stop`, or Ctrl-C, stops it once the matches being played end; `runner stop --now`, or a second Ctrl-C,
+stops them too, which voids them.
+
+`runner service` writes a systemd user service that runs `runner start`, restarts it if it fails, and stops it as
+`runner stop` does:
+
+```bash
+uv run sc2scala runner service
+systemctl --user daemon-reload
+systemctl --user enable --now sc2scala-runner
+```
+
 `sc2scala ladder standings LADDER` lists a ladder's bots by rating, and `sc2scala ladder matches LADDER` its latest
 matches; the server's pages show both, each pair's record, every match with its replay, and every bot. A runner that
 plays strangers' bots should run as a user of its own, as [the sandbox](docs/sandbox.md) says.

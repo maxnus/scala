@@ -1,6 +1,11 @@
+import os
 import shutil
-import time
+import threading
 import zipfile
+from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,40 +21,95 @@ from sc2scala.match_engine import MatchEngine
 from sc2scala.match_result import MatchResult
 from sc2scala.race import Race
 from sc2scala.resource_limits import ResourceLimits
+from sc2scala.runner_config import ANY_HOUR, PlayingSchedule
 from sc2scala.scala_client import ScalaClient
 
 _MAX_UNPACKED_BOT_BYTES = 4 * 1024 * 1024 * 1024
 _ENGINE_LOG_FOLDER_NAME = "engine"
+_MATCH_FOLDER_PREFIX = "match-"
+_CACHED_SUFFIXES = {"bots": ".zip", "maps": ".SC2Map"}
+_LONGEST_WAIT_SECONDS = 300.0
+"""How long a runner outside its windows waits before it reads the clock again, in case the clock jumped."""
+_JOIN_SECONDS = 0.2
+DEFAULT_KEPT_MATCH_FOLDERS = 10
 
 
 class Runner:
-    """Plays the matches a server draws for this machine, one at a time, with `engine`, and reports each.
+    """Plays the matches a server draws for this machine with `engine`, several at once if asked, and reports each.
 
-    Bots and maps are downloaded once into `cache_folder`, by their hashes; each match is played in a folder of its own
-    in `work_folder`, removed once its result is reported, and kept if it is not.
+    Bots and maps are downloaded once into `cache_folder`, by their hashes, and shared by the matches played at once.
+    After each match, while the cache holds more than `cache_bytes`, the files least recently used go, but for those
+    a match is using. Each match is played in a folder of its own in `work_folder`, removed once its result is
+    reported, and kept if it is not, the `kept_match_folders` latest of them.
     """
 
-    def __init__(self, client: ScalaClient, engine: MatchEngine, *, cache_folder: Path, work_folder: Path) -> None:
+    def __init__(
+        self,
+        client: ScalaClient,
+        engine: MatchEngine,
+        *,
+        cache_folder: Path,
+        work_folder: Path,
+        cache_bytes: int | None = None,
+        kept_match_folders: int = DEFAULT_KEPT_MATCH_FOLDERS,
+    ) -> None:
         self.client = client
         self.engine = engine
         self.cache_folder = cache_folder
         self.work_folder = work_folder
+        self.cache_bytes = cache_bytes
+        self.kept_match_folders = kept_match_folders
+        self._stopping = threading.Event()
+        self._stopping_now = threading.Event()
+        self._lock = threading.Lock()
+        self._cached_files_in_use: Counter[Path] = Counter()
+        self._downloads: dict[Path, threading.Lock] = {}
+        self._match_folders_in_play: set[Path] = set()
+        self._last_note: str | None = None
 
-    def run(self, *, poll_seconds: float, once: bool = False) -> None:
-        """Plays match after match, waiting `poll_seconds` whenever none was played, the server unreachable among
-        others; with `once`, asks once, and raises `ServerError` if the server cannot be asked."""
-        while True:
-            try:
-                played = self.play_next()
-            except ServerError as error:
-                if once:
-                    raise
-                logger.error(f"Asking the server failed, and is tried again in {poll_seconds:.0f} s: {error}")
-                played = False
-            if once:
-                return
-            if not played:
-                time.sleep(poll_seconds)
+    @property
+    def stopping(self) -> bool:
+        """Whether the runner was asked to stop."""
+        return self._stopping.is_set()
+
+    def stop(self) -> None:
+        """Takes no new match, and lets `run` return once the matches being played end. Safe in a signal handler."""
+        self._stopping.set()
+
+    def stop_now(self) -> None:
+        """Stops the matches being played as well, which are reported unplayed, so void. Safe in a signal handler."""
+        self._stopping.set()
+        self._stopping_now.set()
+
+    def run(self, *, poll_seconds: float, workers: int = 1, schedule: PlayingSchedule = ANY_HOUR) -> None:
+        """Plays up to `workers` matches at once until `stop` is called, each worker asking for a match whenever it
+        has none and a window of `schedule` is open.
+
+        A worker waits `poll_seconds` after asking in vain, the server unreachable among others, and outside the
+        windows waits for the next to open. First removes what matches cut short left, as `remove_leftovers` does.
+        Raises `ScalaError` if a worker failed in a way it did not foresee, once the others have stopped, which it asks
+        them to.
+        """
+        self.remove_leftovers()
+        failures: list[Exception] = []
+        threads = [
+            threading.Thread(target=self._work, args=(poll_seconds, schedule, failures), name=f"runner-{number}")
+            for number in range(1, workers + 1)
+        ]
+        for thread in threads:
+            thread.start()
+        noted_stopping = noted_stopping_now = False
+        while alive := [thread for thread in threads if thread.is_alive()]:
+            if self._stopping.is_set() and not noted_stopping:
+                noted_stopping = True
+                logger.info("Taking no new match, and stopping once the matches being played end")
+            if self._stopping_now.is_set() and not noted_stopping_now:
+                noted_stopping_now = True
+                logger.info("Stopping the matches being played")
+                self.engine.stop_matches()
+            alive[0].join(timeout=_JOIN_SECONDS)
+        if failures:
+            raise ScalaError(f"The runner stopped after a failure of its own: {failures[0]!r}") from failures[0]
 
     def play_next(self) -> bool:
         """Asks for a match, plays it and reports it; returns whether the server took a result.
@@ -58,21 +118,62 @@ class Runner:
         """
         offered = self.client.next_match()
         if offered is None:
-            logger.info("No match to play")
+            self._note("No match to play")
             return False
-        match_folder = self.work_folder / f"match-{offered['id']}"
+        self._last_note = None
+        match_folder = self.work_folder / f"{_MATCH_FOLDER_PREFIX}{offered['id']}"
+        with self._lock:
+            self._match_folders_in_play.add(match_folder)
+        try:
+            return self._play(offered, match_folder)
+        finally:
+            with self._lock:
+                self._match_folders_in_play.discard(match_folder)
+            self._prune()
+
+    def _work(self, poll_seconds: float, schedule: PlayingSchedule, failures: list[Exception]) -> None:
+        """One worker's matches, played one after the other until the runner stops."""
+        try:
+            while not self._stopping.is_set():
+                opening = schedule.next_opening(datetime.now())
+                if opening is not None:
+                    self._note(f"No playing window is open; the next opens {opening:%a %H:%M}")
+                    self._stopping.wait(min(_seconds_until(opening), _LONGEST_WAIT_SECONDS))
+                    continue
+                try:
+                    played = self.play_next()
+                except ServerError as error:
+                    logger.error(f"Asking the server failed, and is tried again in {poll_seconds:.0f} s: {error}")
+                    played = False
+                if not played:
+                    self._stopping.wait(poll_seconds)
+        except Exception as error:
+            logger.exception(f"{threading.current_thread().name} failed")
+            failures.append(error)
+            self.stop()
+
+    def _play(self, offered: dict[str, Any], match_folder: Path) -> bool:
         description = f"Match {offered['id']} in {offered['ladder']}, " + " vs ".join(
             player["bot"] for player in offered["players"]
         )
         try:
             shutil.rmtree(match_folder, ignore_errors=True)
             match = self._match_from(offered, match_folder)
+            if self._stopping.is_set():
+                raise ScalaError("The runner was stopped before the match began")
+            deadline = datetime.fromisoformat(offered["deadline"])
+            if datetime.now(UTC) + timedelta(seconds=match.limits.max_real_time_seconds) > deadline:
+                raise ScalaError("The match was ready too late to end by its deadline")
             logger.info(f"{description} on {offered['map']['name']}")
             result = self.engine.play(match, output_folder=match_folder / "output")
         except ScalaError as error:
             logger.error(f"{description} could not be played: {error}")
             self.client.report_failure(offered["id"], str(error))
             return False
+        except Exception as error:
+            with suppress(ServerError):
+                self.client.report_failure(offered["id"], f"The runner failed: {type(error).__name__}")
+            raise
         try:
             self.client.report_result(
                 offered["id"], _result_report(result), files=_result_files(match, result, match_folder)
@@ -89,7 +190,8 @@ class Runner:
         bots = [self._bot_from(player, match_folder / "bots" / str(player["seat"])) for player in offered["players"]]
         map_file = match_folder / "maps" / f"{offered['map']['name']}.SC2Map"
         map_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(self._cached("maps", offered["map"]["sha256"], ".SC2Map"), map_file)
+        with self._cached("maps", offered["map"]["sha256"]) as cached_map:
+            shutil.copyfile(cached_map, map_file)
         return Match(
             player_1=bots[0],
             player_2=bots[1],
@@ -100,17 +202,99 @@ class Runner:
 
     def _bot_from(self, player: dict[str, Any], seat_folder: Path) -> Bot:
         folder = seat_folder / player["bot"]
-        archive = self._cached("bots", player["sha256"], ".zip")
-        unpack_bot_archive(archive, folder, max_unpacked_bytes=_MAX_UNPACKED_BOT_BYTES)
+        with self._cached("bots", player["sha256"]) as archive:
+            unpack_bot_archive(archive, folder, max_unpacked_bytes=_MAX_UNPACKED_BOT_BYTES)
         return Bot(name=player["bot"], race=Race(player["race"]), bot_type=BotType(player["type"]), folder=folder)
 
-    def _cached(self, kind: str, sha256: str, suffix: str) -> Path:
-        """The file of `kind` with that hash, downloaded into the cache if it is not there yet."""
-        path = self.cache_folder / kind / f"{sha256}{suffix}"
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            self.client.download(kind, sha256, path)
-        return path
+    @contextmanager
+    def _cached(self, kind: str, sha256: str) -> Iterator[Path]:
+        """The file of `kind` with that hash, downloaded into the cache if it is not there yet, by one worker while
+        the others wait, and kept from pruning while it is used."""
+        path = self.cache_folder / kind / f"{sha256}{_CACHED_SUFFIXES[kind]}"
+        with self._lock:
+            self._cached_files_in_use[path] += 1
+            download = self._downloads.setdefault(path, threading.Lock())
+        try:
+            with download:
+                if not path.exists():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    self.client.download(kind, sha256, path)
+            os.utime(path)
+            yield path
+        finally:
+            with self._lock:
+                self._cached_files_in_use[path] -= 1
+                if not self._cached_files_in_use[path]:
+                    del self._cached_files_in_use[path]
+                    del self._downloads[path]
+
+    def _prune(self) -> None:
+        """Removes the cached files least recently used while the cache holds more than its limit, and the kept match
+        folders but the latest, leaving what a match is using."""
+        try:
+            with self._lock:
+                self._prune_cache()
+                self._prune_kept_match_folders()
+        except OSError as error:
+            logger.warning(f"Pruning the runner's folders failed: {error}")
+
+    def _prune_cache(self) -> None:
+        if self.cache_bytes is None:
+            return
+        by_use = sorted(
+            (path.stat().st_mtime, path.stat().st_size, path)
+            for kind, suffix in _CACHED_SUFFIXES.items()
+            for path in (self.cache_folder / kind).glob(f"*{suffix}")
+        )
+        total = sum(size for _, size, _ in by_use)
+        for _, size, path in by_use:
+            if total <= self.cache_bytes:
+                return
+            if path not in self._cached_files_in_use:
+                path.unlink(missing_ok=True)
+                total -= size
+                logger.info(f"Removed {path.name} from the cache, the least recently used")
+
+    def _prune_kept_match_folders(self) -> None:
+        kept = sorted(
+            (folder for folder in self._match_folders() if folder not in self._match_folders_in_play),
+            key=lambda folder: int(folder.name.removeprefix(_MATCH_FOLDER_PREFIX)),
+        )
+        for folder in kept[: max(len(kept) - self.kept_match_folders, 0)]:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def remove_leftovers(self) -> None:
+        """Removes what matches cut short left: their containers, if the runner was killed while they played, and
+        partial downloads; and prunes the cache and the kept match folders."""
+        for folder in self._match_folders():
+            self.engine.remove_leftovers(folder / "output")
+        for partial in self.cache_folder.glob("*/*.partial"):
+            partial.unlink(missing_ok=True)
+        self._prune()
+
+    def _match_folders(self) -> list[Path]:
+        """The folders of the matches played, kept or being played."""
+        if not self.work_folder.is_dir():
+            return []
+        return [
+            folder
+            for folder in self.work_folder.glob(f"{_MATCH_FOLDER_PREFIX}*")
+            if folder.is_dir() and folder.name.removeprefix(_MATCH_FOLDER_PREFIX).isdigit()
+        ]
+
+    def _note(self, message: str) -> None:
+        """Logs `message`, unless it is the last noted: every worker waiting notes the same."""
+        with self._lock:
+            if message == self._last_note:
+                return
+            self._last_note = message
+        logger.info(message)
+
+
+def _seconds_until(moment: datetime) -> float:
+    """The seconds from now until `moment`, a local time with no time zone, across a change of daylight saving; one
+    at least."""
+    return max((moment.astimezone() - datetime.now().astimezone()).total_seconds(), 1.0)
 
 
 def _result_report(result: MatchResult) -> dict[str, Any]:

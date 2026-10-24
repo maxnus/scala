@@ -73,5 +73,16 @@ makes (`kernel.apparmor_restrict_unprivileged_userns`); its `apparmor` package a
 5. Install `sc2scala` as that user. Its first match downloads AI Arena's images into that user's Docker, about 11 GB,
    28 GB once unpacked, whatever your own Docker holds already.
 
+6. Still as that user, in the shell of step 3, sign in, register the machine, and run it as the user's service, which
+   the linger of step 2 starts at boot:
+
+   ```bash
+   sc2scala login https://scala.example.org
+   sc2scala runner register my-desk
+   sc2scala runner service
+   systemctl --user daemon-reload
+   systemctl --user enable --now sc2scala-runner
+   ```
+
 The engine asks Docker whether it runs rootless, and runs its containers as their root if it does, and as the user
 who started it if it does not.

@@ -58,7 +58,8 @@ version, and a version's rating and games stay in the bot's history once a newer
 
 A ladder is a name, an owner, an optional password, a map pool and the engine's limits: the game time, the time a bot
 may take for one step, and the real time a match may take. They default to those of AI Arena's local setup: 80640
-steps, an hour of game time; 40 ms, with ten strikes; and two hours. A game that reaches its game time ends as a tie. Anyone can create a ladder.
+steps, an hour of game time; 40 ms, with ten strikes; and two hours. A game that reaches its game time ends as a tie.
+Anyone can create a ladder.
 
 Whoever gives a protected ladder's password once becomes a member. Members alone can enter bots, serve it with a
 runner, and see its pages, matches and replays. A public ladder's pages are open to everyone, and anyone signed in can

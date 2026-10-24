@@ -9,10 +9,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from sc2scala.bot import is_valid_bot_name
+from sc2scala.bot_archive import type_of_bot_archive
 from sc2scala.race import Race
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.models import BotRecord, BotVersion, User
-from sc2scala.server.upload_checks import type_of_bot_archive
 from sc2scala.server.web import DatabaseSession, token_user
 
 router = APIRouter(prefix="/api/bots")

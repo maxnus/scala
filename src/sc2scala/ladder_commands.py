@@ -48,6 +48,9 @@ def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     add_map = commands.add_parser("add-map", help="add a map to your ladder")
     add_map.add_argument("name")
     add_map.add_argument("map_file", type=Path, metavar="MAP", help="an .SC2Map file")
+    matches = commands.add_parser("matches", help="list a ladder's latest matches")
+    matches.add_argument("name")
+    matches.add_argument("--limit", type=int, default=20, help="how many (default: 20)")
     remove_map = commands.add_parser("remove-map", help="take a map out of your ladder")
     remove_map.add_argument("name")
     remove_map.add_argument("map_name", metavar="MAP", help="the map's name, without .SC2Map")
@@ -90,6 +93,9 @@ def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -
             print(_description_of(client.add_map(args.name, args.map_file)))
         case "remove-map":
             print(_description_of(client.remove_map(args.name, args.map_name)))
+        case "matches":
+            for played in client.ladder_matches(args.name, limit=args.limit):
+                print(_match_line(played))
     return 0
 
 
@@ -149,3 +155,11 @@ def _description_of(ladder: dict[str, Any]) -> str:
         paused = f", paused: {entry['paused_because']}" if entry["paused"] else ""
         lines.append(f"  {entry['bot']}, by {entry['author']}, version {entry['version']}{paused}")
     return "\n".join(lines)
+
+
+def _match_line(played: dict[str, Any]) -> str:
+    players = " vs ".join(f"{player['bot']} ({player['race']}, v{player['version']})" for player in played["players"])
+    outcome = played["result"] or played["status"]
+    if played["void_because"]:
+        outcome += f": {played['void_because']}"
+    return f"{played['id']}: {players} on {played['map']}, {outcome}, by {played['runner'] or 'a removed runner'}"

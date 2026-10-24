@@ -1,0 +1,116 @@
+"""The API's runner machines, as their owner registers and changes them with a user's token."""
+
+import re
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from sc2scala.server.api_tokens import hash_of_token, new_runner_token
+from sc2scala.server.bots_api import commit_or_conflict
+from sc2scala.server.ladders_api import visible_ladder
+from sc2scala.server.match_draw import LEASED, VOID
+from sc2scala.server.models import Ladder, MatchRecord, RunnerMachine, User, utc_now
+from sc2scala.server.web import DatabaseSession, token_user
+
+router = APIRouter(prefix="/api/runners")
+
+_MACHINE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,39}")
+
+TokenUser = Annotated[User, Depends(token_user)]
+
+
+class MachineRegistration(BaseModel):
+    name: str
+    serves_public: bool = True
+    ladders: list[str] = []
+
+
+class MachineChanges(BaseModel):
+    serves_public: bool | None = None
+    ladders: list[str] | None = None
+
+
+@router.post("")
+def register_machine(session: DatabaseSession, user: TokenUser, registration: MachineRegistration) -> dict[str, Any]:
+    """Registers a machine of the user's, which serves every public ladder if `serves_public`, and the ladders named.
+
+    Answers with the machine's token, once.
+    """
+    if not _MACHINE_NAME_PATTERN.fullmatch(registration.name):
+        raise HTTPException(422, f"A machine's name is letters, digits and '-', 40 at most, not {registration.name!r}")
+    if _machine_named(session, user, registration.name) is not None:
+        raise HTTPException(409, f"You have a machine named {registration.name} already")
+    token = new_runner_token()
+    machine = RunnerMachine(
+        owner_id=user.id,
+        name=registration.name,
+        token_hash=hash_of_token(token),
+        serves_public=registration.serves_public,
+        ladders=_ladders_named(session, registration.ladders, user),
+    )
+    session.add(machine)
+    commit_or_conflict(session, f"Another machine named {registration.name} was registered at the same moment")
+    return {**machine_summary(machine), "token": token}
+
+
+@router.get("")
+def my_machines(session: DatabaseSession, user: TokenUser) -> list[dict[str, Any]]:
+    machines = session.scalars(
+        select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name)
+    )
+    return [machine_summary(machine) for machine in machines]
+
+
+@router.patch("/{name}")
+def change_machine(session: DatabaseSession, user: TokenUser, name: str, changes: MachineChanges) -> dict[str, Any]:
+    machine = _existing_machine(session, user, name)
+    if changes.serves_public is not None:
+        machine.serves_public = changes.serves_public
+    if changes.ladders is not None:
+        machine.ladders = _ladders_named(session, changes.ladders, user)
+    session.commit()
+    return machine_summary(machine)
+
+
+@router.delete("/{name}")
+def remove_machine(session: DatabaseSession, user: TokenUser, name: str) -> dict[str, str]:
+    """Removes a machine, whose token then fails, and voids the matches it was playing."""
+    machine = _existing_machine(session, user, name)
+    for match in session.scalars(
+        select(MatchRecord).where(MatchRecord.machine_id == machine.id, MatchRecord.status == LEASED)
+    ):
+        match.status = VOID
+        match.void_because = "its runner machine was removed"
+        match.finished_at = utc_now()
+    session.delete(machine)
+    session.commit()
+    return {"removed": name}
+
+
+def machine_summary(machine: RunnerMachine) -> dict[str, Any]:
+    return {
+        "name": machine.name,
+        "owner": machine.owner.login,
+        "serves_public": machine.serves_public,
+        "ladders": [ladder.name for ladder in machine.ladders],
+        "last_seen_at": machine.last_seen_at.isoformat() if machine.last_seen_at else None,
+    }
+
+
+def _ladders_named(session: Session, names: list[str], user: User) -> list[Ladder]:
+    """The ladders named, each one the user may see; 404 or 403 for any other."""
+    return [visible_ladder(session, name, user) for name in dict.fromkeys(names)]
+
+
+def _machine_named(session: Session, user: User, name: str) -> RunnerMachine | None:
+    return session.scalar(select(RunnerMachine).where(RunnerMachine.owner_id == user.id, RunnerMachine.name == name))
+
+
+def _existing_machine(session: Session, user: User, name: str) -> RunnerMachine:
+    machine = _machine_named(session, user, name)
+    if machine is None:
+        raise HTTPException(404, f"You have no machine named {name}")
+    return machine

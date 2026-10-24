@@ -33,6 +33,11 @@ client_secret = ""
 max_bot_mib = 500
 max_bot_unpacked_mib = 2048
 max_map_mib = 50
+max_result_file_mib = 300
+
+# A runner has a match's real-time limit and this margin, in seconds, to report its result.
+[runners]
+lease_margin_seconds = 900
 """
 
 
@@ -43,7 +48,8 @@ class ServerConfig:
     `dev_sign_in` lets anyone sign in under any name, so it is refused, by `ValueError`, unless both `host` and
     `public_url` are local: a server behind a reverse proxy listens locally, yet serves everyone. `secret_key` signs the
     session cookies. A bot's zip may hold `max_bot_upload_mib`, and unpack to `max_bot_unpacked_mib`; a map may hold
-    `max_map_upload_mib`.
+    `max_map_upload_mib`, and each file of a match's result `max_result_upload_mib`. A runner has a match's real-time
+    limit and `lease_margin_seconds` to report its result.
     """
 
     data_folder: Path
@@ -57,6 +63,8 @@ class ServerConfig:
     max_bot_upload_mib: int = 500
     max_bot_unpacked_mib: int = 2048
     max_map_upload_mib: int = 50
+    max_result_upload_mib: int = 300
+    lease_margin_seconds: int = 900
 
     def __post_init__(self) -> None:
         if self.dev_sign_in and self.host not in _LOCAL_HOSTS:
@@ -98,6 +106,8 @@ class ServerConfig:
             max_bot_upload_mib=int(uploads.get("max_bot_mib", 500)),
             max_bot_unpacked_mib=int(uploads.get("max_bot_unpacked_mib", 2048)),
             max_map_upload_mib=int(uploads.get("max_map_mib", 50)),
+            max_result_upload_mib=int(uploads.get("max_result_file_mib", 300)),
+            lease_margin_seconds=int(settings.get("runners", {}).get("lease_margin_seconds", 900)),
         )
 
 

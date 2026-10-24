@@ -171,11 +171,12 @@ Each step ends in something that runs, and is a pull request of its own.
      `login`, `whoami` and `logout`.
    - 3b, done: bots and versions, ladders, maps and membership, and their commands. A bot's entry pauses after 5
      failed starts in a row, which 3c counts.
-   - 3c: the matches as above, results, and `sc2scala runner`, which plays one match at a time, at any hour.
+   - 3c, done: the matches as above, results, and `sc2scala runner`, which plays one match at a time, at any hour.
+     An `InitializationError` counts as a failed start for both bots, since it names neither.
    - 3d: ratings, the prior's width chosen on the prototype's AI Arena results, and each ladder's pages: standings,
      matches with their replays, and each pair's record.
-4. **Many runners, windows and deadlines.** The config file above, `runner stop`, and the server voiding matches past
-   their deadline.
+4. **Many runners, windows and deadlines.** The config file above, `runner stop`, a ladder's owner barring a runner
+   and voiding its results, and pruning the runner's cache. The server voids matches past their deadline since 3c.
 5. **Windows.** An install guide for WSL2, tested on a Windows machine.
 6. **The first public server**, on the owner's VPS.
 

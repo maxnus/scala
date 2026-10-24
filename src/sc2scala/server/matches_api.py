@@ -35,12 +35,22 @@ def ladder_matches(session: DatabaseSession, user: TokenUser, name: str, limit: 
 
 @router.get("/matches/{match_id}")
 def match(session: DatabaseSession, user: TokenUser, match_id: int) -> dict[str, Any]:
-    return match_summary(_visible_match(session, user, match_id))
+    return match_summary(visible_match(session, user, match_id))
 
 
 @router.get("/matches/{match_id}/replay")
 def match_replay(request: Request, session: DatabaseSession, user: TokenUser, match_id: int) -> FileResponse:
-    seen = _visible_match(session, user, match_id)
+    return replay_of(request, session, user, match_id)
+
+
+@router.get("/matches/{match_id}/logs/{part}")
+def match_logs(request: Request, session: DatabaseSession, user: TokenUser, match_id: int, part: str) -> FileResponse:
+    return logs_of(request, session, user, match_id, part)
+
+
+def replay_of(request: Request, session: Session, user: User | None, match_id: int) -> FileResponse:
+    """A match's replay, for whoever sees its ladder."""
+    seen = visible_match(session, user, match_id)
     if seen.replay_sha256 is None:
         raise HTTPException(404, f"Match {match_id} has no replay")
     file_store: FileStore = request.app.state.file_store
@@ -51,18 +61,17 @@ def match_replay(request: Request, session: DatabaseSession, user: TokenUser, ma
     )
 
 
-@router.get("/matches/{match_id}/logs/{part}")
-def match_logs(request: Request, session: DatabaseSession, user: TokenUser, match_id: int, part: str) -> FileResponse:
+def logs_of(request: Request, session: Session, user: User | None, match_id: int, part: str) -> FileResponse:
     """A bot's logs, `1` or `2` by its seat, for the bot's author alone, or the engine's, `engine`, for the ladder's
     owner and the runner machine's."""
-    seen = _visible_match(session, user, match_id)
+    seen = visible_match(session, user, match_id)
     if part in ("1", "2"):
-        version = seen.versions[int(part) - 1]
-        if version.bot.owner_id != user.id:
-            raise HTTPException(403, f"{version.bot.name}'s logs are for {version.bot.owner.login} alone")
+        if not may_read_bot_logs(seen, user, seat=int(part)):
+            bot = seen.versions[int(part) - 1].bot
+            raise HTTPException(403, f"{bot.name}'s logs are for {bot.owner.login} alone")
         sha256 = seen.player_1_logs_sha256 if part == "1" else seen.player_2_logs_sha256
     elif part == "engine":
-        if user.id not in (seen.ladder.owner_id, seen.machine.owner_id if seen.machine else None):
+        if not may_read_engine_logs(seen, user):
             raise HTTPException(403, "The engine's logs are for the ladder's owner and the runner's")
         sha256 = seen.engine_logs_sha256
     else:
@@ -73,6 +82,15 @@ def match_logs(request: Request, session: DatabaseSession, user: TokenUser, matc
     return FileResponse(
         file_store.path_of(LOGS, sha256, LOGS_SUFFIX), media_type="application/zip", filename=f"{match_id}-{part}.zip"
     )
+
+
+def may_read_bot_logs(record: MatchRecord, user: User | None, *, seat: int) -> bool:
+    return user is not None and record.versions[seat - 1].bot.owner_id == user.id
+
+
+def may_read_engine_logs(record: MatchRecord, user: User | None) -> bool:
+    runner_owner = record.machine.owner_id if record.machine else None
+    return user is not None and user.id in (record.ladder.owner_id, runner_owner)
 
 
 def match_summary(record: MatchRecord) -> dict[str, Any]:
@@ -96,7 +114,8 @@ def match_summary(record: MatchRecord) -> dict[str, Any]:
     }
 
 
-def _visible_match(session: Session, user: User, match_id: int) -> MatchRecord:
+def visible_match(session: Session, user: User | None, match_id: int) -> MatchRecord:
+    """The match; 404 if there is none, and 403 if its ladder is protected and the user, if any, no member."""
     record = session.get(MatchRecord, match_id)
     if record is None:
         raise HTTPException(404, f"No match {match_id}")

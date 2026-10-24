@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Pairs of {{ ladder.name }} · Scala{% endblock %}
+{% block main %}
+  <h1>Pairs of <a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a></h1>
+  <p class="muted">Each row bot's games won–lost–tied against each column bot, between their latest versions.</p>
+  {% if pairs.bots | length > 1 %}
+    <div class="scrolls">
+      <table class="pairs">
+        <thead><tr><th></th>{% for bot in pairs.bots %}<th class="number">{{ bot }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for bot in pairs.bots %}
+            <tr>
+              <th><a href="/bots/{{ bot }}">{{ bot }}</a></th>
+              {% for opponent in pairs.bots %}
+                {% set record = pairs.records.get((bot, opponent)) %}
+                <td class="number{% if record and record.wins > record.losses %} ahead{% elif record and record.wins < record.losses %} behind{% endif %}">
+                  {% if bot == opponent %}<span class="muted">·</span>{% elif record %}{{ record.wins }}–{{ record.losses }}–{{ record.ties }}{% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Pairs need two bots entered.</p>
+  {% endif %}
+{% endblock %}

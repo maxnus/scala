@@ -11,6 +11,40 @@
       <pre>sc2scala login {{ request.app.state.config.public_url }}</pre>
     </section>
   {% endif %}
+  <h2>Your bots</h2>
+  {% if bots %}
+    <table>
+      <thead><tr><th>Bot</th><th>Race</th><th class="number">Latest version</th></tr></thead>
+      <tbody>
+        {% for bot in bots %}
+          <tr>
+            <td><a href="/bots/{{ bot.name }}">{{ bot.name }}</a></td>
+            <td>{{ bot.race }}</td>
+            <td class="number">{{ bot.latest_version.number if bot.latest_version else "" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">None yet: upload one with <code>sc2scala bot upload NAME FOLDER --race T</code>.</p>
+  {% endif %}
+  <h2>Your runner machines</h2>
+  {% if machines %}
+    <table>
+      <thead><tr><th>Machine</th><th>Serves</th><th>Last seen</th></tr></thead>
+      <tbody>
+        {% for machine in machines %}
+          <tr>
+            <td>{{ machine.name }}</td>
+            <td>{% if machine.serves_public %}every public ladder{% if machine.ladders %}, and {% endif %}{% endif %}{% for ladder in machine.ladders %}<a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if not machine.serves_public and not machine.ladders %}no ladder{% endif %}</td>
+            <td class="muted">{{ machine.last_seen_at | when if machine.last_seen_at else "never" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">None yet: make this computer one with <code>sc2scala runner register NAME</code>.</p>
+  {% endif %}
   <h2>Tokens</h2>
   <p>A token lets the <code>sc2scala</code> command and your runners act for you. Delete one you no longer use.</p>
   {% if user.api_tokens %}

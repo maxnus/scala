@@ -1,13 +1,17 @@
 import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from sc2scala.__about__ import __version__
@@ -18,6 +22,7 @@ from sc2scala.server import (
     bots_api,
     ladders_api,
     matches_api,
+    pages,
     runner_api,
     runners_api,
     sign_in_routes,
@@ -27,12 +32,14 @@ from sc2scala.server.file_store import FileStore
 from sc2scala.server.github_accounts import GitHubAccounts
 from sc2scala.server.github_oauth_app import GitHubOAuthApp
 from sc2scala.server.server_config import ServerConfig
-from sc2scala.server.web import DatabaseSession, SignInRequired, render, signed_in_user
+from sc2scala.server.web import SignInRequired, render, signed_in_user
 
 _PACKAGE_FOLDER = Path(__file__).parent
 _SESSION_COOKIE = "scala_session"
 _SESSION_DAYS = 30
 _FILES_FOLDER_NAME = "files"
+_REFUSAL_TITLES = {403: "Not for you to see", 404: "Not found"}
+_STEPS_PER_GAME_SECOND = 22.4
 
 
 def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None = None) -> FastAPI:
@@ -52,6 +59,8 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.state.config = config
     app.state.engine = engine
     app.state.templates = Jinja2Templates(directory=_PACKAGE_FOLDER / "templates")
+    app.state.templates.env.filters["when"] = _when
+    app.state.templates.env.filters["game_time"] = _game_time
     app.state.file_store = FileStore(config.data_folder / _FILES_FOLDER_NAME)
     app.state.match_random = random.SystemRandom()
     if github_accounts is None and config.github_sign_in:
@@ -74,10 +83,19 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(runners_api.router)
     app.include_router(runner_api.router)
     app.include_router(matches_api.router)
+    app.include_router(pages.router)
 
-    @app.get("/", response_class=HTMLResponse)
-    def home_page(request: Request, session: DatabaseSession) -> HTMLResponse:
-        return render(request, "home.html", user=signed_in_user(request, session))
+    @app.exception_handler(StarletteHTTPException)
+    async def explain_refusal(request: Request, error: StarletteHTTPException) -> Response:
+        """A page's refusal as a page; the API's as FastAPI answers it."""
+        if request.url.path.startswith(("/api/", "/static/")):
+            return await http_exception_handler(request, error)
+        title = _REFUSAL_TITLES.get(error.status_code, "Something went wrong")
+        with Session(engine) as session:
+            user = signed_in_user(request, session)
+            return render(
+                request, "message.html", user=user, title=title, message=error.detail, status_code=error.status_code
+            )
 
     @app.exception_handler(SignInRequired)
     def send_to_sign_in(request: Request, error: SignInRequired) -> RedirectResponse:
@@ -94,3 +112,16 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
         return JSONResponse({"detail": str(error)}, status_code=413 if isinstance(error, UploadTooLargeError) else 422)
 
     return app
+
+
+def _when(moment: datetime | None) -> str:
+    """A moment to the minute, in UTC."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC") if moment else ""
+
+
+def _game_time(steps: int | None) -> str:
+    """Game steps as minutes and seconds of game time, at the game's faster speed."""
+    if steps is None:
+        return ""
+    minutes, seconds = divmod(round(steps / _STEPS_PER_GAME_SECOND), 60)
+    return f"{minutes}:{seconds:02d}"

@@ -66,8 +66,9 @@ uv run sc2scala runner start
 
 `runner start` downloads the engine's images first if Docker lacks them, about 11 GB. It keeps bots and maps in
 `~/.cache/sc2scala`, plays each match in `~/.local/share/sc2scala/work`, and reports its result, replay and logs.
-`sc2scala ladder matches LADDER` lists a ladder's latest matches. A runner that plays strangers' bots should run as a
-user of its own, as [the sandbox](docs/sandbox.md) says.
+`sc2scala ladder standings LADDER` lists a ladder's bots by rating, and `sc2scala ladder matches LADDER` its latest
+matches; the server's pages show both, each pair's record, every match with its replay, and every bot. A runner that
+plays strangers' bots should run as a user of its own, as [the sandbox](docs/sandbox.md) says.
 
 ## Developing
 

@@ -113,6 +113,9 @@ class ScalaClient:
     def remove_machine(self, name: str) -> dict[str, Any]:
         return self._request("DELETE", f"/api/runners/{name}")
 
+    def ladder_standings(self, name: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/api/ladders/{name}/standings")
+
     def ladder_matches(self, name: str, *, limit: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/api/ladders/{name}/matches", params={"limit": limit})
 

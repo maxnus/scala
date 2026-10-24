@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ ladder.name }} · Scala{% endblock %}
+{% block main %}
+  <h1>{{ ladder.name }}</h1>
+  <p class="muted">
+    By {{ ladder.owner.login }}{% if ladder.is_protected %}, protected{% endif %} ·
+    {{ ladder.maps | length }} maps: {% for map_file in ladder.maps %}{{ map_file.name }}{% if not loop.last %}, {% endif %}{% endfor %} ·
+    <a href="/ladders/{{ ladder.name }}/pairs">pairs</a> · <a href="/ladders/{{ ladder.name }}/matches">all matches</a>
+  </p>
+  <h2>Standings</h2>
+  {% if standings %}
+    <div class="scrolls">
+    <table>
+      <thead>
+        <tr>
+          <th class="number">#</th><th>Bot</th><th>Author</th><th>Race</th><th class="number">Version</th>
+          <th class="number">Rating</th><th class="number">Games</th><th class="number">Won–lost–tied</th>
+          <th class="number">Crashes</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for standing in standings %}
+          {% set rating = standing.rating %}
+          <tr{% if standing.entry.paused %} class="paused"{% endif %}>
+            <td class="number">{% if rating %}{{ loop.index }}{% endif %}</td>
+            <td><a href="/bots/{{ standing.entry.bot.name }}">{{ standing.entry.bot.name }}</a></td>
+            <td>{{ standing.entry.bot.owner.login }}</td>
+            <td>{{ standing.entry.bot.race }}</td>
+            <td class="number">{{ standing.version.number }}</td>
+            <td class="number">{% if rating %}{{ standing.displayed_rating }} <span class="muted">± {{ standing.interval }}</span>{% else %}<span class="muted">unrated</span>{% endif %}</td>
+            <td class="number">{{ rating.games if rating else 0 }}</td>
+            <td class="number">{% if rating %}{{ rating.wins }}–{{ rating.losses }}–{{ rating.ties }}{% endif %}</td>
+            <td class="number">{{ rating.crashes if rating else "" }}</td>
+            <td class="muted">{% if standing.entry.paused %}paused: {{ standing.entry.paused_because }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="note">
+      Ratings are a Bradley-Terry fit of every counted game, on the Elo scale about 1500, the ladder's mean; ± is the
+      95% interval. A crash or a time-out counts as a loss, a tie as half a win, and a game that did not start not at
+      all. A new version starts a new rating, held near the middle at first by a prior of {{ prior_sd | int }} points.
+    </p>
+  {% else %}
+    <p class="muted">No bot is entered yet. Enter one with <code>sc2scala ladder enter {{ ladder.name }} BOT</code>.</p>
+  {% endif %}
+  <h2>Latest matches</h2>
+  {% include "_matches_table.html" %}
+{% endblock %}

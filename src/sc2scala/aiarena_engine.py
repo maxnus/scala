@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -12,7 +13,7 @@ from loguru import logger
 from sc2scala.bot import Bot
 from sc2scala.bot_type import BotType
 from sc2scala.command_runner import CommandRunner, run_command
-from sc2scala.errors import EngineError, MatchTimeoutError
+from sc2scala.errors import EngineError, MatchStoppedError, MatchTimeoutError
 from sc2scala.game_limits import GameLimits
 from sc2scala.log_watchdog import LogWatchdog
 from sc2scala.match import Match
@@ -25,6 +26,9 @@ AIARENA_IMAGE_TAG = "v0.8.0"
 _REAL_TIME_MARGIN_SECONDS = 300
 _CONTAINER_STOP_SECONDS = 10
 _WORK_FOLDER_NAME = ".work"
+_COMPOSE_FILE_NAME = "docker-compose.json"
+_PROJECT_FILE_NAME = "compose-project"
+"""The file in the work folder that names the match's Compose project while its containers may exist."""
 _MATCH_CONTROLLER_SERVICE = "proxy_controller"
 _GAME_FOLDER = "/root/StarCraftII"
 _MEBIBYTE = 1024 * 1024
@@ -44,6 +48,8 @@ class AiArenaEngine:
     The engine lays its files out in a work folder inside the output folder, and removes it once the match is over,
     leaving the replay and `logs`, which holds the controllers' logs and each bot's own, in `player_1-<name>` and
     `player_2-<name>`, and `compose.log`, what Docker Compose wrote. With `keep_work_folder`, the work folder stays.
+
+    One engine plays matches from several threads at once, and `stop_matches` stops them all.
     """
 
     def __init__(
@@ -58,6 +64,10 @@ class AiArenaEngine:
         self.keep_work_folder = keep_work_folder
         self.rootless = rootless
         self._run_command = run_command
+        self._lock = threading.Lock()
+        self._stopped = False
+        self._playing: dict[tuple[str, ...], Path] = {}
+        """The Compose command of each match being played, with its log."""
 
     @property
     def images(self) -> list[str]:
@@ -73,11 +83,40 @@ class AiArenaEngine:
             if self._run_command(["docker", "pull", "--quiet", image], timeout=None, log_file=log_file) != 0:
                 raise EngineError(f"Docker could not pull {image}; see {log_file}")
 
+    def stop_matches(self) -> None:
+        """Kills the containers of the matches being played, which then raise `MatchStoppedError`, and refuses to play
+        any later."""
+        with self._lock:
+            self._stopped = True
+            playing = list(self._playing.items())
+        for compose, compose_log in playing:
+            try:
+                self._run_command([*compose, "kill"], timeout=_CONTAINER_STOP_SECONDS * 6, log_file=compose_log)
+            except (EngineError, subprocess.TimeoutExpired) as error:
+                logger.warning(f"Docker Compose could not kill a match's containers: {error}")
+
+    def remove_leftovers(self, output_folder: Path) -> None:
+        """Removes the containers of a match played into `output_folder`, if what played it was killed before it
+        could, which the work folder then still names; raises `EngineError` if Docker Compose cannot."""
+        project_file = output_folder / _WORK_FOLDER_NAME / _PROJECT_FILE_NAME
+        if not project_file.is_file():
+            return
+        project_name = project_file.read_text(encoding="utf-8").strip()
+        logger.info(f"Removing the containers of {project_name}, which a match left in {output_folder}")
+        log_file = output_folder / "logs" / "compose.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        down = ["docker", "compose", "--project-name", project_name, "down", "--remove-orphans"]
+        if self._run_command([*down, "--timeout", str(_CONTAINER_STOP_SECONDS)], timeout=None, log_file=log_file) != 0:
+            raise EngineError(f"Docker Compose could not remove the containers of {project_name}; see {log_file}")
+        project_file.unlink()
+
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         """Plays `match` as `MatchEngine.play` says.
 
-        Raises `MatchTimeoutError` if the match runs past its real-time limit and a margin, and `EngineError` for a
-        Windows bot, or if Docker is missing, a container does not start, or the engine reports no result.
+        Raises `MatchTimeoutError` if the match runs past its real-time limit and a margin, `MatchStoppedError` if
+        `stop_matches` stopped it, and `EngineError` for a Windows bot, or if Docker is missing, a container does not
+        start, or the engine reports no result. A match that raises leaves its work folder, but for its copies of the
+        bots and the map.
         """
         for bot in (match.player_1, match.player_2):
             if bot.bot_type == BotType.CPP_WIN32:
@@ -97,17 +136,23 @@ class AiArenaEngine:
         compose = ["docker", "compose", "--project-name", project_name, "--file", str(compose_file)]
 
         logger.info(f"Playing {match.player_1.name} against {match.player_2.name} on {match.map_name}")
-        real_time_seconds, seat_over_log_limit = self._play_in_containers(
-            match, compose=compose, work_folder=work_folder, compose_log=compose_log
-        )
-        replay_file = _move_replay(work_folder / "replays", output_folder)
-        _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
         try:
-            engine_result = _read_engine_result(work_folder / "results.json", compose_log=compose_log)
-        except EngineError:
-            if seat_over_log_limit is None:
-                raise
-            engine_result = {}
+            real_time_seconds, seat_over_log_limit = self._play_in_containers(
+                match, compose=compose, project_name=project_name, work_folder=work_folder, compose_log=compose_log
+            )
+            replay_file = _move_replay(work_folder / "replays", output_folder)
+            _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
+            try:
+                engine_result = _read_engine_result(work_folder / "results.json", compose_log=compose_log)
+            except EngineError:
+                if seat_over_log_limit is None:
+                    raise
+                engine_result = {}
+        except Exception:
+            if not self.keep_work_folder:
+                for copies in ("bots", "maps"):
+                    shutil.rmtree(work_folder / copies, ignore_errors=True)
+            raise
         if not self.keep_work_folder:
             try:
                 shutil.rmtree(work_folder)
@@ -128,25 +173,36 @@ class AiArenaEngine:
         )
 
     def _play_in_containers(
-        self, match: Match, *, compose: list[str], work_folder: Path, compose_log: Path
+        self, match: Match, *, compose: list[str], project_name: str, work_folder: Path, compose_log: Path
     ) -> tuple[float, int | None]:
         """Creates the match's containers, starts them, waits for the match controller to end, and removes them,
         whatever happens.
 
         A container that stops, a bot's killed for its logs among them, leaves the others playing. Returns the real time
-        the match took, and the seat of the bot whose logs grew past their limit, or `None`.
+        the match took, and the seat of the bot whose logs grew past their limit, or `None`. After each step, raises
+        `MatchStoppedError` if `stop_matches` was called meanwhile. The work folder names the project while its
+        containers may exist, for `remove_leftovers`.
         """
         started = time.monotonic()
         created = False
+        project_file = work_folder / _PROJECT_FILE_NAME
+        with self._lock:
+            if self._stopped:
+                raise MatchStoppedError("The match was stopped before it began")
+            self._playing[tuple(compose)] = compose_log
+        project_file.write_text(project_name + "\n", encoding="utf-8")
+        removed = False
         try:
             create = [*compose, "create", "--pull", "missing"]
             create_exit_code = self._run_command(create, timeout=None, log_file=compose_log)
             created = True
             if create_exit_code != 0:
                 raise EngineError(f"Docker Compose could not create the match's containers; see {compose_log}")
+            self._raise_if_stopped()
             started = time.monotonic()
             if self._run_command([*compose, "up", "--detach"], timeout=None, log_file=compose_log) != 0:
                 raise EngineError(f"Docker Compose could not start the match's containers; see {compose_log}")
+            self._raise_if_stopped()
             timeout = match.limits.max_real_time_seconds + _REAL_TIME_MARGIN_SECONDS
             watchdog = LogWatchdog(
                 [work_folder / "logs" / f"bot_controller{seat}" for seat in (1, 2)],
@@ -161,6 +217,7 @@ class AiArenaEngine:
                     self._run_command(wait, timeout=timeout, log_file=compose_log)
             except subprocess.TimeoutExpired as error:
                 raise MatchTimeoutError(f"The match ran past {timeout} seconds and was stopped") from error
+            self._raise_if_stopped()
             return time.monotonic() - started, watchdog.exceeded_seat
         finally:
             if created:
@@ -170,7 +227,16 @@ class AiArenaEngine:
                 except subprocess.TimeoutExpired:
                     logger.warning(f"Docker Compose took too long to write the containers' output to {compose_log}")
                 down = [*compose, "down", "--remove-orphans", "--timeout", str(_CONTAINER_STOP_SECONDS)]
-                self._run_command(down, timeout=None, log_file=compose_log)
+                removed = self._run_command(down, timeout=None, log_file=compose_log) == 0
+            if removed or not created:
+                project_file.unlink()
+            with self._lock:
+                self._playing.pop(tuple(compose), None)
+
+    def _raise_if_stopped(self) -> None:
+        with self._lock:
+            if self._stopped:
+                raise MatchStoppedError("The match was stopped while it was played")
 
 
 def _prepare_output_folder(output_folder: Path) -> None:
@@ -205,7 +271,7 @@ def _lay_out_work_folder(match: Match, *, work_folder: Path, image_tag: str, con
     (work_folder / "matches").write_text(_matches_line(match) + "\n", encoding="utf-8")
     (work_folder / "results.json").write_text('{"results": []}\n', encoding="utf-8")
     (work_folder / "config.toml").write_text(_engine_config(match.limits), encoding="utf-8")
-    compose_file = work_folder / "docker-compose.json"
+    compose_file = work_folder / _COMPOSE_FILE_NAME
     compose_project = _compose_project(
         match, work_folder=work_folder.resolve(), image_tag=image_tag, user=container_user
     )

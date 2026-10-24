@@ -1,5 +1,6 @@
 import json
 import random
+import threading
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -22,9 +23,17 @@ from tests.match_helpers import REPLAY_BYTES, LadderWithBots, ladder_with_bots
 class FakeEngine:
     """Plays a match by writing what the engine writes: player 1 wins, with a replay and logs; or raises `error`."""
 
-    def __init__(self, *, error: EngineError | None = None) -> None:
+    def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.matches: list[Match] = []
+        self.stopped = threading.Event()
+        self.cleaned_up: list[Path] = []
+
+    def stop_matches(self) -> None:
+        self.stopped.set()
+
+    def remove_leftovers(self, output_folder: Path) -> None:
+        self.cleaned_up.append(output_folder)
 
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         self.matches.append(match)
@@ -160,41 +169,31 @@ def test_a_result_the_server_refuses_leaves_the_runner_going_and_the_folder_kept
 
 
 class UnreachableAtFirst:
-    """Stands in for the server's client: unreachable at the first ask, with nothing to play after."""
+    """Stands in for the server's client: unreachable at the first ask, with nothing to play after, and stops `runner`
+    at the `asks_before_stop`th ask."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, asks_before_stop: int = 0) -> None:
         self.asks = 0
+        self.asks_before_stop = asks_before_stop
+        self.runner: Runner | None = None
 
     def next_match(self) -> None:
         self.asks += 1
+        if self.runner is not None and self.asks == self.asks_before_stop:
+            self.runner.stop()
         if self.asks == 1:
             raise ServerError("http://localhost could not be reached: connection refused")
         return None
 
 
-def test_a_runner_waits_and_asks_again_when_the_server_cannot_be_reached(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class StopRunning(Exception):
-        pass
-
-    waits: list[float] = []
-
-    def wait(seconds: float) -> None:
-        waits.append(seconds)
-        if len(waits) == 2:
-            raise StopRunning
-
-    monkeypatch.setattr("sc2scala.runner.time.sleep", wait)
-    client = UnreachableAtFirst()
+def test_a_runner_waits_and_asks_again_when_the_server_cannot_be_reached(tmp_path: Path) -> None:
+    client = UnreachableAtFirst(asks_before_stop=3)
     runner = Runner(client, FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path)  # type: ignore[arg-type]
-    with pytest.raises(StopRunning):
-        runner.run(poll_seconds=5)
-    assert (client.asks, waits) == (2, [5, 5])
+    client.runner = runner
+    runner.run(poll_seconds=0.01)
+    assert client.asks == 3
     with pytest.raises(ServerError):
-        Runner(UnreachableAtFirst(), FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path).run(  # type: ignore[arg-type]
-            poll_seconds=5, once=True
-        )
+        Runner(UnreachableAtFirst(), FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path).play_next()  # type: ignore[arg-type]
 
 
 def test_runner_set_changes_what_it_is_given_alone(

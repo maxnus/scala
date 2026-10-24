@@ -4,7 +4,7 @@ from sc2scala.__about__ import __version__
 from sc2scala.aiarena_engine import AIARENA_IMAGE_TAG, AiArenaEngine
 from sc2scala.bot import Bot
 from sc2scala.bot_type import BotType
-from sc2scala.errors import EngineError, MatchTimeoutError, ScalaError
+from sc2scala.errors import EngineError, MatchStoppedError, MatchTimeoutError, ScalaError
 from sc2scala.game_limits import GameLimits
 from sc2scala.match import Match
 from sc2scala.match_engine import MatchEngine
@@ -23,6 +23,7 @@ __all__ = [
     "Match",
     "MatchEngine",
     "MatchResult",
+    "MatchStoppedError",
     "MatchTimeoutError",
     "Race",
     "ResourceLimits",

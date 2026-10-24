@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -15,6 +16,7 @@ from sc2scala import (
     EngineError,
     GameLimits,
     Match,
+    MatchStoppedError,
     MatchTimeoutError,
     Race,
     ResourceLimits,
@@ -275,6 +277,97 @@ def test_a_match_past_its_time_is_stopped_and_cleaned_up(tmp_path: Path, match: 
     assert docker.subcommands() == ["create", "up", "wait", "logs", "down"]
 
 
+class DockerPlayingUntilKilled(FakeDocker):
+    """Stands in for `docker`, its `wait` waiting until the match's containers are killed."""
+
+    def __init__(self) -> None:
+        super().__init__(engine_result=_RESULT_OF_A_WIN)
+        self.waiting = threading.Event()
+        self.killed = threading.Event()
+
+    def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+        if list(args[6:]) == ["kill"]:
+            self.killed.set()
+        if "wait" in args:
+            self.waiting.set()
+            assert self.killed.wait(timeout=10)
+        return super().__call__(args, timeout=timeout, log_file=log_file)
+
+
+def test_stopping_the_matches_kills_their_containers_and_refuses_later_matches(tmp_path: Path, match: Match) -> None:
+    docker = DockerPlayingUntilKilled()
+    engine = engine_with(docker)
+    stopped: list[MatchStoppedError] = []
+
+    def play() -> None:
+        try:
+            engine.play(match, output_folder=tmp_path / "out")
+        except MatchStoppedError as error:
+            stopped.append(error)
+
+    playing = threading.Thread(target=play)
+    playing.start()
+    assert docker.waiting.wait(timeout=10)
+    engine.stop_matches()
+    playing.join(timeout=10)
+    assert [str(error) for error in stopped] == ["The match was stopped while it was played"]
+    assert docker.subcommands() == ["create", "up", "kill", "wait", "logs", "down"]
+    with pytest.raises(MatchStoppedError, match="before it began"):
+        engine.play(match, output_folder=tmp_path / "later")
+    assert len(docker.commands) == 6
+
+
+class DockerNamingItsProject(FakeDocker):
+    """Stands in for `docker`, recording what the work folder names at `create`."""
+
+    def __init__(self) -> None:
+        super().__init__(engine_result=_RESULT_OF_A_WIN)
+        self.named_at_create: str | None = None
+
+    def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+        if "create" in args:
+            project_file = Path(args[args.index("--file") + 1]).parent / "compose-project"
+            self.named_at_create = project_file.read_text(encoding="utf-8").strip()
+        return super().__call__(args, timeout=timeout, log_file=log_file)
+
+
+def test_a_match_names_its_project_while_its_containers_may_exist(tmp_path: Path, match: Match) -> None:
+    docker = DockerNamingItsProject()
+    output_folder = tmp_path / "out"
+    engine_with(docker, keep_work_folder=True).play(match, output_folder=output_folder)
+    assert docker.named_at_create == docker.commands[0][3]
+    assert not (output_folder / ".work" / "compose-project").exists()
+
+
+def test_the_containers_a_killed_match_left_are_removed_by_the_project_it_named(tmp_path: Path) -> None:
+    docker = FakeDocker()
+    project_file = tmp_path / "out" / ".work" / "compose-project"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text("sc2scala-0123456789ab\n", encoding="utf-8")
+    engine = engine_with(docker)
+    engine.remove_leftovers(tmp_path / "out")
+    assert docker.commands == [
+        ["docker", "compose", "--project-name", "sc2scala-0123456789ab", "down", "--remove-orphans", "--timeout", "10"]
+    ]
+    assert not project_file.exists()
+    engine.remove_leftovers(tmp_path / "out")
+    assert len(docker.commands) == 1
+
+
+def test_containers_docker_compose_cannot_remove_raise_and_stay_named(tmp_path: Path) -> None:
+    project_file = tmp_path / "out" / ".work" / "compose-project"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text("sc2scala-0123456789ab\n", encoding="utf-8")
+
+    def failing_docker(args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+        return 1
+
+    engine = AiArenaEngine(run_command=failing_docker, rootless=False)
+    with pytest.raises(EngineError, match="could not remove the containers of sc2scala-0123456789ab"):
+        engine.remove_leftovers(tmp_path / "out")
+    assert project_file.exists()
+
+
 def test_containers_that_were_not_created_are_cleaned_up(tmp_path: Path, match: Match) -> None:
     docker = FakeDocker(create_exit_code=1)
     with pytest.raises(EngineError, match="could not create"):
@@ -287,6 +380,16 @@ def test_a_match_with_no_result_raises_but_keeps_its_logs(tmp_path: Path, match:
     with pytest.raises(EngineError, match="no result"):
         engine_with(FakeDocker(engine_result=None)).play(match, output_folder=output_folder)
     assert (output_folder / "logs" / "player_1-basic_bot" / "stderr.log").is_file()
+
+
+def test_a_match_that_raises_keeps_its_work_folder_but_not_its_copies_of_the_bots(tmp_path: Path, match: Match) -> None:
+    output_folder = tmp_path / "out"
+    with pytest.raises(EngineError, match="no result"):
+        engine_with(FakeDocker(engine_result=None)).play(match, output_folder=output_folder)
+    work_folder = output_folder / ".work"
+    assert (work_folder / "docker-compose.json").is_file()
+    assert not (work_folder / "bots").exists()
+    assert not (work_folder / "maps").exists()
 
 
 def test_a_result_of_unknown_type_raises(tmp_path: Path, match: Match) -> None:

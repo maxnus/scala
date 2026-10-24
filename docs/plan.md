@@ -107,15 +107,16 @@ ladder's page also shows each pair's record.
 
 ### Runners
 
-A runner plays one match at a time, on a machine that runs `sc2scala runner`, a service: systemd on Linux, and in WSL2,
-which runs systemd too. The machine's config file sets how many runners it contributes, the ladders they serve, and the
-weekly windows in which they play, in the machine's time zone:
+A machine contributes runners: it plays as many matches at once as it has runners, each a thread of one
+`sc2scala runner start`, which runs as a service, systemd's on Linux and in WSL2, which runs systemd too. The ladders it
+serves are the server's to know, set by `sc2scala runner register` and `runner set`. How many runners it has, how much
+disk its cache may take, and the weekly windows in which it plays, in its own time zone, are its own, in a file beside
+its token that `runner register` writes with the defaults:
 
 ```toml
 # ~/.config/sc2scala/runner.toml
-server = "https://scala.example.org"
 runners = 4
-ladders = ["public", "friday-league"]
+cache_gib = 20
 
 [[window]]
 days = "mon-fri"
@@ -126,10 +127,19 @@ to = "07:00"
 days = "sat-sun"
 ```
 
-A runner asks for a match only inside a window. When a window ends, it takes no new match and lets the one it is
-playing finish, which the real-time limit bounds. `sc2scala runner stop` does the same at once, and with `--now` stops
-the matches being played, which voids them. Every connection goes out from the machine, so a runner needs no open port,
-behind a home router or in WSL2. The machine keeps downloaded bot versions and maps by their hash.
+A runner asks for a match only inside a window; one that crosses midnight belongs to the days it starts on, and with
+none, a runner plays at any hour. When a window closes, the runners take no new match and let those they play finish,
+which the real-time limit bounds, then wait for the next window to open. A match that is ready to start too late to end
+by its deadline, with 5 minutes to start and report, its bots slow to download say, is reported unplayed rather than
+started. `sc2scala runner stop`, or SIGTERM, as systemd sends, stops the runners once their matches end, and `--now`,
+SIGQUIT or a second Ctrl-C stops the matches too, which voids them. One `runner start` runs per user. Every connection
+goes out from the machine, so a runner needs no open port, behind a home router or in WSL2. The machine keeps the bot
+versions and maps it downloaded, by their hash, the least recently used going once they pass `cache_gib`, and the logs
+of the 10 latest matches it could not play or whose result the server did not take.
+
+A match of light bots takes about 2.2 GB and 1.5 cores at its peak (step 1), so `runner register` suggests one runner
+per 4 cores and 8 GiB. A ladder's default limits let one match take up to 15 GiB: 4 for each bot, 6 for the game and 1
+for the match controller.
 
 The game client, the Linux StarCraft II 4.10, comes in the `arenaclient-sc2` image, so a machine needs only x86-64
 Linux, Docker Engine with Compose, and the app.
@@ -177,8 +187,10 @@ Each step ends in something that runs, and is a pull request of its own.
    - 3d, done: ratings, the prior's width chosen on the prototype's AI Arena results (100 Elo points, by
      `tools/choose_rating_prior.py`), and each ladder's pages: standings, matches with their replays, and each pair's
      record.
-4. **Many runners, windows and deadlines.** The config file above, `runner stop`, a ladder's owner barring a runner
-   and voiding its results, and pruning the runner's cache. The server voids matches past their deadline since 3c.
+4. **Many runners, windows and barring runners**, in two pull requests. The server voids matches past their deadline
+   since 3c.
+   - 4a, done: the runners above, their file, windows, `runner stop` and `runner service`, and pruning the cache.
+   - 4b: a ladder's owner listing the machines that played it, and barring one, which voids its results there.
 5. **Windows.** An install guide for WSL2, tested on a Windows machine.
 6. **The first public server**, on the owner's VPS.
 

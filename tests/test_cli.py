@@ -16,6 +16,12 @@ class RecordingEngine:
         self.error = error
         self.matches: list[Match] = []
 
+    def stop_matches(self) -> None:
+        pass
+
+    def remove_leftovers(self, output_folder: Path) -> None:
+        pass
+
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         self.matches.append(match)
         if self.error is not None:

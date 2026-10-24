@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from collections.abc import Sequence
 from contextlib import ExitStack
 from pathlib import Path
@@ -126,10 +127,11 @@ class ScalaClient:
     def download(self, kind: str, sha256: str, destination: Path) -> None:
         """Downloads the runner's file of `kind`, `bots` or `maps`, to `destination`, and checks its SHA-256.
 
-        Raises `ServerError` if the file is not what its hash says.
+        The file is written under a name of its own, and renamed once whole, so that two downloads of one file do not
+        mix. Raises `ServerError` if the file is not what its hash says.
         """
         digest = hashlib.sha256()
-        partial = destination.with_name(destination.name + ".partial")
+        partial = destination.with_name(f"{destination.name}.{uuid.uuid4().hex[:8]}.partial")
         try:
             with (
                 self._http.stream(

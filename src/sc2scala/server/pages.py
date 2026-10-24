@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.result_code import ResultCode
 from sc2scala.server.bots_api import bot_named
-from sc2scala.server.ladder_ratings import INTERVAL_WIDTH, PRIOR_SD, pair_records, standings
+from sc2scala.server.ladder_ratings import (
+    INTERVAL_WIDTH,
+    PRIOR_SD,
+    pair_records,
+    rating_of_latest_version,
+    standings,
+)
 from sc2scala.server.ladders_api import is_member, visible_ladder
 from sc2scala.server.match_draw import LEASED, VOID
 from sc2scala.server.matches_api import (
@@ -20,7 +26,7 @@ from sc2scala.server.matches_api import (
     replay_of,
     visible_match,
 )
-from sc2scala.server.models import Ladder, MatchRecord, User
+from sc2scala.server.models import Ladder, LadderEntry, MatchRecord, User
 from sc2scala.server.web import DatabaseSession, render, signed_in_user
 
 router = APIRouter()
@@ -114,13 +120,14 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
     bot = bot_named(session, name)
     if bot is None:
         raise HTTPException(404, f"No bot is named {name}")
-    entries = session.scalars(select(Ladder).where(Ladder.entries.any(bot_id=bot.id)).order_by(Ladder.name))
-    ladders = []
-    for ladder in entries:
-        if ladder.is_protected and not is_member(ladder, user):
-            continue
-        standing = next((standing for standing in standings(session, ladder) if standing.entry.bot_id == bot.id), None)
-        ladders.append({"ladder": ladder, "standing": standing})
+    entries = session.scalars(
+        select(LadderEntry).join(Ladder).where(LadderEntry.bot_id == bot.id).order_by(Ladder.name)
+    )
+    ladders = [
+        {"ladder": entry.ladder, "standing": rating_of_latest_version(session, entry.ladder, entry)}
+        for entry in entries
+        if not entry.ladder.is_protected or is_member(entry.ladder, user)
+    ]
     visible_ids = [entry["ladder"].id for entry in ladders]
     version_ids = [version.id for version in bot.versions]
     matches = session.scalars(

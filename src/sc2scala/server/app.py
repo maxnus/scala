@@ -1,4 +1,5 @@
 import random
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -63,6 +64,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.state.templates.env.filters["game_time"] = _game_time
     app.state.file_store = FileStore(config.data_folder / _FILES_FOLDER_NAME)
     app.state.match_random = random.SystemRandom()
+    app.state.refit_lock = threading.Lock()
     if github_accounts is None and config.github_sign_in:
         github_accounts = GitHubOAuthApp(client_id=config.github_client_id, client_secret=config.github_client_secret)
     app.state.github_accounts = github_accounts

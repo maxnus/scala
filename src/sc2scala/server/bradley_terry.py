@@ -48,8 +48,8 @@ def fit_ratings(
             break
     _, hessian = _gradient_and_hessian(strengths, first_players, second_players, scores, prior_precision)
     covariance = np.linalg.inv(-hessian)
-    centering = np.eye(player_count) - 1 / player_count
-    variances = np.diag(centering @ covariance @ centering)
+    # The diagonal of (I - 1/n) C (I - 1/n), the covariance of the ratings less their mean, without forming it.
+    variances = np.diag(covariance) - 2 * covariance.mean(axis=1) + covariance.mean()
     return FittedRatings(
         ratings=strengths / _NATURAL_UNITS_PER_ELO_POINT,
         standard_errors=np.sqrt(variances) / _NATURAL_UNITS_PER_ELO_POINT,

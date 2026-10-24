@@ -1,6 +1,7 @@
 """A ladder's ratings: which results count and how, refitting them after a result, its standings and pair records."""
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
@@ -15,7 +16,7 @@ PRIOR_SD = 100.0
 prototype's data, by `tools/choose_rating_prior.py`."""
 
 DISPLAYED_MEAN = 1500
-"""What the ladder's mean rating is shown as."""
+"""What the mean rating of every version that played in the ladder is shown as."""
 
 INTERVAL_WIDTH = 1.96
 """Standard errors on each side of a rating, for an interval of 95%."""
@@ -79,6 +80,16 @@ class PairRecords:
 
     bots: list[str]
     records: dict[tuple[str, str], Record] = field(default_factory=dict)
+
+
+def refit_after_result(app: Any, ladder_id: int) -> None:
+    """Refits the ladder's ratings in a session of its own, holding the app's lock on refits, so that refits of one
+    server process run one at a time and each takes in every result committed before it began."""
+    with app.state.refit_lock, Session(app.state.engine) as session:
+        ladder = session.get(Ladder, ladder_id)
+        if ladder is not None:
+            refit_ratings(session, ladder)
+            session.commit()
 
 
 def refit_ratings(session: Session, ladder: Ladder) -> None:
@@ -184,3 +195,12 @@ def _add_game(record: Record, score: float, *, crashed: bool) -> None:
         record.ties += 1
     if crashed:
         record.crashes += 1
+
+
+def rating_of_latest_version(session: Session, ladder: Ladder, entry: LadderEntry) -> Standing | None:
+    """The entered bot's standing by its latest version, read alone; `None` if the bot has no version."""
+    version = entry.bot.latest_version
+    if version is None:
+        return None
+    rating = session.get(Rating, {"ladder_id": ladder.id, "version_id": version.id})
+    return Standing(entry=entry, version=version, rating=rating)

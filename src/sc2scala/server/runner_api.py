@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -19,7 +19,7 @@ from sc2scala.resource_limits import ResourceLimits
 from sc2scala.result_code import ResultCode
 from sc2scala.server.bots_api import BOT_ARCHIVE_SUFFIX, BOT_ARCHIVES
 from sc2scala.server.file_store import FileStore
-from sc2scala.server.ladder_ratings import refit_ratings
+from sc2scala.server.ladder_ratings import refit_after_result
 from sc2scala.server.ladders_api import MAP_FILES
 from sc2scala.server.match_draw import LEASED, VOID, draw_match, record_result, void_expired_leases
 from sc2scala.server.models import MatchRecord, RunnerMachine, utc_now
@@ -85,6 +85,7 @@ def report_result(
     session: DatabaseSession,
     machine: Machine,
     match_id: int,
+    background: BackgroundTasks,
     result: Annotated[str, Form()],
     replay: UploadFile | None = None,
     player_1_logs: UploadFile | None = None,
@@ -92,7 +93,7 @@ def report_result(
     engine_logs: UploadFile | None = None,
 ) -> dict[str, Any]:
     """Finishes a match leased to the machine with its result, a JSON object of `code`, `game_steps` and
-    `average_step_times`, and keeps its replay and logs.
+    `average_step_times`, and keeps its replay and logs; the ladder's ratings are refitted once the runner is answered.
 
     409 once the match is void, its deadline passed among others.
     """
@@ -114,8 +115,8 @@ def report_result(
     match.game_steps = game_steps
     match.player_1_average_step_time, match.player_2_average_step_time = average_step_times
     record_result(session, match, code, now=utc_now())
-    refit_ratings(session, match.ladder)
     session.commit()
+    background.add_task(refit_after_result, request.app, match.ladder_id)
     return {"id": match.id, "status": match.status, "result": match.result}
 
 

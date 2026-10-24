@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ user.login }} · Scala{% endblock %}
+{% block main %}
+  <h1>{{ user.login }}</h1>
+  {% if new_token %}
+    <section class="new-token">
+      <h2>Your new token, {{ new_token_name }}</h2>
+      <p>Copy it now: this page shows it once, and the server keeps only its hash.</p>
+      <pre>{{ new_token }}</pre>
+      <p>Sign the <code>sc2scala</code> command in with it:</p>
+      <pre>sc2scala login {{ request.app.state.config.public_url }}</pre>
+    </section>
+  {% endif %}
+  <h2>Tokens</h2>
+  <p>A token lets the <code>sc2scala</code> command and your runners act for you. Delete one you no longer use.</p>
+  {% if user.api_tokens %}
+    <table>
+      <thead><tr><th>Name</th><th>Made</th><th>Last used</th><th></th></tr></thead>
+      <tbody>
+        {% for api_token in user.api_tokens %}
+          <tr>
+            <td>{{ api_token.name }}</td>
+            <td>{{ api_token.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</td>
+            <td>{{ api_token.last_used_at.strftime("%Y-%m-%d %H:%M") ~ " UTC" if api_token.last_used_at else "never" }}</td>
+            <td>
+              <form method="post" action="/account/tokens/{{ api_token.id }}/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="link">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>You have no token yet.</p>
+  {% endif %}
+  <form method="post" action="/account/tokens" class="new-token-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name <input name="name" required maxlength="100" placeholder="my laptop"></label>
+    <button type="submit">Make a token</button>
+  </form>
+{% endblock %}

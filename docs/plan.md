@@ -33,6 +33,11 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 6. **A repository of its own, in Python**: `maxnus/scala`, shipped as `sc2scala`, the package, the import and the
    command, as NachOS ships as `sc2nachos`. Bots talk to the engine through the ladder's command line (`--GamePort`,
    `--StartPort`, `--LadderServer`, `--OpponentId`), so a bot on any library plays.
+7. **People sign in with GitHub** (the owner, 2026-10-24, for step 3). The server keeps no passwords; the CLI and the
+   runners act for a user with tokens made on the account page and kept as hashes. A dev sign-in by any name serves
+   tests and a server on one's own machine, and is refused unless the server listens on a local address.
+8. **The server renders its pages**, with no JavaScript build. In step 3 they only show; what changes something goes
+   through the CLI.
 
 ## Design
 
@@ -161,9 +166,14 @@ Each step ends in something that runs, and is a pull request of its own.
    which sets how many runners a machine can take.
 2. **The sandbox.** Done: as above, tested by bots that try to break each wall. The rootless setup is documented, and
    not yet tried.
-3. **The server and one runner.** Accounts, bots and versions, public and protected ladders, the matches as above,
-   results, ratings, and each ladder's page with its standings, matches and replays. A runner plays one match at a time,
-   at any hour.
+3. **The server and one runner**, in four pull requests:
+   - 3a, done: the server's config and database, sign-in with GitHub and the dev sign-in, tokens, and `sc2scala server`,
+     `login`, `whoami` and `logout`.
+   - 3b: bots and versions, ladders, maps and membership, and their commands. A bot's entry pauses after 5 failed
+     starts in a row.
+   - 3c: the matches as above, results, and `sc2scala runner`, which plays one match at a time, at any hour.
+   - 3d: ratings, the prior's width chosen on the prototype's AI Arena results, and each ladder's pages: standings,
+     matches with their replays, and each pair's record.
 4. **Many runners, windows and deadlines.** The config file above, `runner stop`, and the server voiding matches past
    their deadline.
 5. **Windows.** An install guide for WSL2, tested on a Windows machine.
@@ -171,12 +181,9 @@ Each step ends in something that runs, and is a pull request of its own.
 
 ## Open
 
-- **Signing in**: GitHub accounts, or an email and a password. Step 3.
 - **The license.** NachOS is MIT. The engine is GPL-3.0, and Scala only runs its images, as separate programs.
 - **What a bot keeps between games**, as AI Arena's `data` folder: left out. With it, a bot plays one match at a time.
 - **Checking a result against its replay**, against a runner that reports falsely.
-- **A bot that keeps failing to start**: when it is set inactive.
-- **The pages**: rendered by the server, or an app of their own.
 - **Matchmaking beyond random**: the prototype compares random pairing with round-robin, rung and a stochastic
   matchmaker on AI Arena's results.
 - **Seasons**: whether a ladder restarts its ratings.

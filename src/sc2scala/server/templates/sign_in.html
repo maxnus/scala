@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Scala{% endblock %}
+{% block main %}
+  <h1>Sign in</h1>
+  {% if user %}
+    <p>You are signed in as {{ user.login }}.</p>
+  {% endif %}
+  {% if github_sign_in %}
+    <p><a class="button" href="/sign-in/github?next={{ next | urlencode }}">Sign in with GitHub</a></p>
+  {% endif %}
+  {% if dev_sign_in %}
+    <form method="post" action="/sign-in/dev" class="dev-sign-in">
+      <p>Dev sign-in, for a server on this machine alone: any name, no password.</p>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>Name <input name="login" required maxlength="39" pattern="[A-Za-z0-9][A-Za-z0-9\-]*"></label>
+      <button type="submit">Sign in</button>
+    </form>
+  {% endif %}
+  {% if not github_sign_in and not dev_sign_in %}
+    <p>This server lets nobody sign in: its config names no GitHub app, and has no dev sign-in.</p>
+  {% endif %}
+{% endblock %}

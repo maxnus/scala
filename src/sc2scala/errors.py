@@ -8,3 +8,15 @@ class EngineError(ScalaError, RuntimeError):
 
 class MatchTimeoutError(EngineError, TimeoutError):
     """A match ran past its real-time limit and a margin, and was stopped."""
+
+
+class SignInError(ScalaError):
+    """Signing in failed: GitHub refused, or the account cannot be used here."""
+
+
+class ServerError(ScalaError):
+    """The server refused a request, or could not be reached."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code

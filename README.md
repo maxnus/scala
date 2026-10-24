@@ -22,6 +22,24 @@ A bot is a folder named for it, in AI Arena's layout: `run.py` for a Python bot,
 to `matches/<time>-<bot>-vs-<bot>`, or the empty folder `--output` names: `result.json`, the replay, and `logs`, which
 holds each bot's own logs in `player_1-<name>` and `player_2-<name>`, and the engine's.
 
+## Running a server
+
+A server needs `sc2scala[server]`. Given a data folder, it writes a `server.toml` there with defaults for a server on
+this machine alone, at http://127.0.0.1:8000, with the dev sign-in, which takes any name and no password:
+
+```bash
+uv sync --extra server
+uv run sc2scala server --data path/to/server-data
+```
+
+To let people sign in with GitHub, register an OAuth app on GitHub, with `<public_url>/sign-in/github/callback` as its
+callback URL, and put its client id and secret in `server.toml`. Make a token on the server's account page, and sign
+the command in with it:
+
+```bash
+uv run sc2scala login http://127.0.0.1:8000
+```
+
 ## Developing
 
 | Task | Command |
@@ -32,3 +50,4 @@ holds each bot's own logs in `player_1-<name>` and `player_2-<name>`, and the en
 | Lint | `uv run ruff check .` and `uv run ruff format --check .` |
 | Type check | `uv run pyright` |
 | Measure one match's memory and CPU | `uv run python tools/measure_match.py BOT BOT --map MAP` |
+| Write a migration for a change to the server's models | `uv run python tools/new_migration.py "what changed"` |

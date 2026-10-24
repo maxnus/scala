@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+    "httpx>=0.28",
     "loguru>=0.7",
 ]
 
@@ -27,7 +28,17 @@ Repository = "https://github.com/maxnus/scala"
 sc2scala = "sc2scala.cli:main"
 
 [project.optional-dependencies]
+server = [
+    "alembic>=1.16",
+    "fastapi>=0.115",
+    "itsdangerous>=2.2",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.20",
+    "sqlalchemy>=2.0",
+    "uvicorn>=0.34",
+]
 dev = [
+    "sc2scala[server]",
     "pytest>=8.0",
     "ruff>=0.8",
     "pyright>=1.1.390",
@@ -47,6 +58,8 @@ packages = ["src/sc2scala"]
 testpaths = ["tests"]
 addopts = "-m 'not integration'"
 markers = ["integration: needs Docker and the engine's images, and plays a match"]
+# Starlette's test client asks for httpx2, which the server does not use.
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 
 [tool.pyright]
 include = ["src", "tests", "tools"]

@@ -1,0 +1,18 @@
+.idea
+.vscode
+.claude/*
+!.claude/CLAUDE.md
+.env
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# What `sc2scala play` writes by default
+/matches/

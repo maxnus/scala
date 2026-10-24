@@ -39,7 +39,8 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 ### Bots
 
 A bot is a name, a race (Terran, Zerg, Protoss or random), AI Arena's type for it and an upload, a zip in AI Arena's
-layout. The engine starts a bot by the first of these its folder holds:
+layout. Scala reads the type from the first of these the bot's folder holds (`BotType.from_folder`), and the engine
+starts the bot as its type says:
 
 | The folder holds | Started as | AI Arena's type |
 |---|---|---|
@@ -153,9 +154,9 @@ Tests that start the engine need Docker and are marked `integration`.
 
 Each step ends in something that runs, and is a pull request of its own.
 
-1. **One match, no server.** `sc2scala play <bot folder> <bot folder> --map <map>` plays one match through the engine
-   and writes the result and the replay. It measures the memory and CPU of one match, which sets how many runners a
-   machine can take.
+1. **One match, no server.** Done: `sc2scala play <bot folder> <bot folder> --map <map>` plays one match through the
+   engine and writes the result and the replay, and `tools/measure_match.py` measures the memory and CPU of one match,
+   which sets how many runners a machine can take.
 2. **The sandbox**, as above, with its tests.
 3. **The server and one runner.** Accounts, bots and versions, public and protected ladders, the matches as above,
    results, ratings, and each ladder's page with its standings, matches and replays. A runner plays one match at a time,

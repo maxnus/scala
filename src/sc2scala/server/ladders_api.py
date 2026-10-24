@@ -7,10 +7,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.errors import UploadRefusedError
-from sc2scala.server.bots_api import bot_named
+from sc2scala.server.bots_api import bot_named, commit_or_conflict
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import limits_changed
 from sc2scala.server.models import Ladder, LadderEntry, LadderMember, MapFile, User
@@ -71,14 +71,23 @@ def create_ladder(
     ladder.members.append(LadderMember(user_id=user.id))
     for upload in maps:
         _add_map(request, session, ladder, upload, uploader=user)
-    session.commit()
+    commit_or_conflict(session, f"Another ladder named {name} was made at the same moment")
     return ladder_details(ladder, user)
 
 
 @router.get("")
 def all_ladders(session: DatabaseSession, user: TokenUser) -> list[dict[str, Any]]:
     """Every ladder, a protected one shown in full to its members alone."""
-    ladders = session.scalars(select(Ladder).order_by(Ladder.name))
+    ladders = session.scalars(
+        select(Ladder)
+        .options(
+            selectinload(Ladder.owner),
+            selectinload(Ladder.maps),
+            selectinload(Ladder.entries),
+            selectinload(Ladder.members),
+        )
+        .order_by(Ladder.name)
+    )
     return [ladder_summary(ladder, user) for ladder in ladders]
 
 
@@ -89,7 +98,10 @@ def ladder(session: DatabaseSession, user: TokenUser, name: str) -> dict[str, An
 
 @router.patch("/{name}")
 def change_ladder(session: DatabaseSession, user: TokenUser, name: str, changes: LadderChanges) -> dict[str, Any]:
-    """Sets or removes the password, and changes limits, which the next matches take; for the ladder's owner alone."""
+    """Sets or removes the password, and changes limits, which the next matches take; for the ladder's owner alone.
+
+    Whoever joined with an earlier password stays a member.
+    """
     ladder = _owned_ladder(session, name, user)
     if changes.new_password and changes.remove_password:
         raise HTTPException(422, "Set a password or remove it, not both")
@@ -263,7 +275,7 @@ def _authors_entry(session: Session, name: str, bot_name: str, user: User) -> La
 
 
 def _add_map(request: Request, session: Session, ladder: Ladder, upload: UploadFile, *, uploader: User) -> None:
-    """Adds the uploaded map to the ladder, kept once whichever ladders hold it.
+    """Adds the uploaded map to the ladder under the name of its file, which is kept once whichever ladders hold it.
 
     409 if the ladder holds another map of the same name.
     """
@@ -276,7 +288,7 @@ def _add_map(request: Request, session: Session, ladder: Ladder, upload: UploadF
         max_bytes=request.app.state.config.max_map_upload_mib * _MEBIBYTE,
         check=check_map,
     )
-    map_file = session.scalar(select(MapFile).where(MapFile.sha256 == stored.sha256))
+    map_file = session.scalar(select(MapFile).where(MapFile.name == map_name, MapFile.sha256 == stored.sha256))
     if map_file is None:
         map_file = MapFile(
             name=map_name, sha256=stored.sha256, size_bytes=stored.size_bytes, uploaded_by_id=uploader.id

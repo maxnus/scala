@@ -111,13 +111,15 @@ class BotVersion(Base):
 
 
 class MapFile(Base):
-    """A map, kept by its SHA-256, which any number of ladders may hold."""
+    """A map, by its name and its file, which any number of ladders may hold; the file is kept once by its SHA-256,
+    whatever names it was uploaded under."""
 
     __tablename__ = "maps"
+    __table_args__ = (UniqueConstraint("name", "sha256"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
-    sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
     size_bytes: Mapped[int]
     uploaded_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)

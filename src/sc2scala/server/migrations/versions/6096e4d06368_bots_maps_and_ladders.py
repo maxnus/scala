@@ -1,8 +1,8 @@
 """bots, maps and ladders
 
-Revision ID: a5c8c63f3782
+Revision ID: 6096e4d06368
 Revises: 9b5a07094b74
-Created: 2026-10-24 14:18:01.349009
+Created: 2026-10-24 14:24:41.836759
 """
 
 from collections.abc import Sequence
@@ -12,7 +12,7 @@ from alembic import op
 
 import sc2scala.server.models
 
-revision: str = "a5c8c63f3782"
+revision: str = "6096e4d06368"
 down_revision: str | None = "9b5a07094b74"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -61,8 +61,11 @@ def upgrade() -> None:
             ["uploaded_by_id"], ["users.id"], name=op.f("fk_maps_uploaded_by_id_users"), ondelete="SET NULL"
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_maps")),
-        sa.UniqueConstraint("sha256", name=op.f("uq_maps_sha256")),
+        sa.UniqueConstraint("name", "sha256", name=op.f("uq_maps_name_sha256")),
     )
+    with op.batch_alter_table("maps", schema=None) as batch_op:
+        batch_op.create_index(batch_op.f("ix_maps_sha256"), ["sha256"], unique=False)
+
     op.create_table(
         "bot_versions",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -139,6 +142,9 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f("ix_bot_versions_bot_id"))
 
     op.drop_table("bot_versions")
+    with op.batch_alter_table("maps", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_maps_sha256"))
+
     op.drop_table("maps")
     with op.batch_alter_table("ladders", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_ladders_owner_id"))

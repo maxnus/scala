@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from sc2scala.bot import is_valid_bot_name
@@ -69,7 +70,7 @@ def upload_version(
             number=len(bot.versions) + 1, sha256=stored.sha256, size_bytes=stored.size_bytes, bot_type=bot_type.value
         )
         bot.versions.append(version)
-    session.commit()
+    commit_or_conflict(session, f"Another upload of {name} came at the same moment: upload again")
     return {"bot": bot_summary(bot), "version": version_summary(version), "new": is_new}
 
 
@@ -99,6 +100,15 @@ def download_version(
     file_store: FileStore = request.app.state.file_store
     path = file_store.path_of(BOT_ARCHIVES, version.sha256, BOT_ARCHIVE_SUFFIX)
     return FileResponse(path, media_type="application/zip", filename=f"{bot.name}-{version.number}.zip")
+
+
+def commit_or_conflict(session: Session, conflict: str) -> None:
+    """Commits the session, and answers 409 with `conflict` if another request broke a unique constraint first."""
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(409, conflict) from error
 
 
 def bot_named(session: Session, name: str) -> BotRecord | None:

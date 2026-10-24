@@ -11,31 +11,31 @@ from sc2scala.errors import UploadRefusedError
 _MAP_NAME_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
 _MAP_SIGNATURE = b"MPQ"
 MAP_SUFFIX = ".SC2Map"
+_UNPACK_CHUNK_BYTES = 1024 * 1024
 
 
 def type_of_bot_archive(archive_path: Path, *, bot_name: str, max_unpacked_bytes: int) -> BotType:
-    """The type of the bot `bot_name` in the zip at `archive_path`, by the entry point at its root.
+    """The type of the bot `bot_name` in the zip at `archive_path`, by the entry point at its root, which a name may
+    reach by `./`.
 
-    Raises `UploadRefusedError` for a file that is not a zip, a path that would unpack outside the bot's folder, a
-    symbolic link, more than `max_unpacked_bytes` unpacked, no entry point, or a Windows bot, which the engine cannot
-    run.
+    Raises `UploadRefusedError` for a file that is not a zip or is damaged, a path that would unpack outside the bot's
+    folder, a symbolic link, more than `max_unpacked_bytes` unpacked, counted by unpacking, no entry point, or a
+    Windows bot, which the engine cannot run.
     """
     try:
         with zipfile.ZipFile(archive_path) as archive:
             members = archive.infolist()
-    except zipfile.BadZipFile as error:
-        raise UploadRefusedError("The upload is not a zip") from error
-    unpacked_bytes = 0
-    root_files = set()
-    for member in members:
-        _check_member_path(member.filename)
-        if stat.S_ISLNK(member.external_attr >> 16):
-            raise UploadRefusedError(f"The zip holds a symbolic link, {member.filename}")
-        unpacked_bytes += member.file_size
-        if unpacked_bytes > max_unpacked_bytes:
-            raise UploadRefusedError(f"The zip unpacks to more than {max_unpacked_bytes // (1024 * 1024)} MiB")
-        if not member.is_dir() and "/" not in member.filename:
-            root_files.add(member.filename)
+            root_files = set()
+            for member in members:
+                _check_member_path(member.filename)
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    raise UploadRefusedError(f"The zip holds a symbolic link, {member.filename}")
+                path_in_folder = member.filename.removeprefix("./")
+                if not member.is_dir() and "/" not in path_in_folder:
+                    root_files.add(path_in_folder)
+            _check_unpacked_bytes(archive, members, max_unpacked_bytes=max_unpacked_bytes)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, NotImplementedError, OSError) as error:
+        raise UploadRefusedError(f"The upload is not a zip that can be unpacked: {error}") from error
     try:
         bot_type = BotType.from_file_names(root_files, bot_name=bot_name)
     except ValueError as error:
@@ -43,6 +43,20 @@ def type_of_bot_archive(archive_path: Path, *, bot_name: str, max_unpacked_bytes
     if bot_type == BotType.CPP_WIN32:
         raise UploadRefusedError("Windows bots do not play yet: the engine's images hold no Wine")
     return bot_type
+
+
+def _check_unpacked_bytes(archive: zipfile.ZipFile, members: list[zipfile.ZipInfo], *, max_unpacked_bytes: int) -> None:
+    """Unpacks every file, keeping nothing, and raises `UploadRefusedError` once more than `max_unpacked_bytes` came
+    out, whatever sizes the zip declares."""
+    unpacked_bytes = 0
+    for member in members:
+        if member.is_dir():
+            continue
+        with archive.open(member) as unpacked:
+            while chunk := unpacked.read(_UNPACK_CHUNK_BYTES):
+                unpacked_bytes += len(chunk)
+                if unpacked_bytes > max_unpacked_bytes:
+                    raise UploadRefusedError(f"The zip unpacks to more than {max_unpacked_bytes // (1024 * 1024)} MiB")
 
 
 def map_name_of(file_name: str) -> str:

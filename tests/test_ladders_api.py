@@ -159,3 +159,13 @@ def test_the_owner_adds_and_removes_maps_but_not_the_last(server: TestClient) ->
     assert other_pylon.status_code == 409
     assert server.delete("/api/ladders/league/maps/UltraloveAIE_v2", headers=alice).status_code == 200
     assert server.delete("/api/ladders/league/maps/PylonAIE_v4", headers=alice).status_code == 409
+
+
+def test_each_ladder_holds_a_shared_map_under_the_name_it_gave(server: TestClient) -> None:
+    alice = api_headers_of(server, "alice")
+    first = create_ladder(server, alice, "first", maps={"Pylon.SC2Map": MAP_BYTES}).json()
+    second = create_ladder(server, alice, "second", maps={"PylonAIE_v4.SC2Map": MAP_BYTES}).json()
+    assert [map_file["name"] for map_file in first["maps"]] == ["Pylon"]
+    assert [map_file["name"] for map_file in second["maps"]] == ["PylonAIE_v4"]
+    assert first["maps"][0]["sha256"] == second["maps"][0]["sha256"]
+    assert map_rows(server) == 1

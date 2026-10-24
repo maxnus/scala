@@ -29,7 +29,9 @@ def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     change = commands.add_parser("set", help="change your ladder's password or limits")
     change.add_argument("name")
     protection = change.add_mutually_exclusive_group()
-    protection.add_argument("--protect", action="store_true", help="set a new password, asked for")
+    protection.add_argument(
+        "--protect", action="store_true", help="set a new password, asked for; whoever joined before stays a member"
+    )
     protection.add_argument("--unprotect", action="store_true", help="remove the password")
     _add_limit_argument(change)
     join = commands.add_parser("join", help="join a protected ladder with its password")

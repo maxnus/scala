@@ -195,10 +195,10 @@ Each step ends in something that runs, and is a pull request of its own.
    - 3d, done: ratings, the prior's width chosen on the prototype's AI Arena results (100 Elo points, by
      `tools/choose_rating_prior.py`), and each ladder's pages: standings, matches with their replays, and each pair's
      record.
-4. **Many runners, windows and barring runners**, in two pull requests. The server voids matches past their deadline
-   since 3c.
+4. **Many runners, windows and barring runners**, done, in two pull requests. The server voids matches past their
+   deadline since 3c.
    - 4a, done: the runners above, their file, windows, `runner stop` and `runner service`, and pruning the cache.
-   - 4b: a ladder's owner listing the machines that played it, and barring one, which voids its results there.
+   - 4b, done: a ladder's runners listed, and its owner barring one, which voids its results there.
 5. **Windows.** An install guide for WSL2, tested on a Windows machine.
 6. **The first public server**, on the owner's VPS.
 

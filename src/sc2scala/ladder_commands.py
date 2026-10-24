@@ -48,6 +48,8 @@ def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     add_map = commands.add_parser("add-map", help="add a map to your ladder")
     add_map.add_argument("name")
     add_map.add_argument("map_file", type=Path, metavar="MAP", help="an .SC2Map file")
+    standings = commands.add_parser("standings", help="show a ladder's bots by rating")
+    standings.add_argument("name")
     matches = commands.add_parser("matches", help="list a ladder's latest matches")
     matches.add_argument("name")
     matches.add_argument("--limit", type=int, default=20, help="how many (default: 20)")
@@ -93,6 +95,9 @@ def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -
             print(_description_of(client.add_map(args.name, args.map_file)))
         case "remove-map":
             print(_description_of(client.remove_map(args.name, args.map_name)))
+        case "standings":
+            for place, standing in enumerate(client.ladder_standings(args.name), start=1):
+                print(_standing_line(place, standing))
         case "matches":
             for played in client.ladder_matches(args.name, limit=args.limit):
                 print(_match_line(played))
@@ -163,3 +168,13 @@ def _match_line(played: dict[str, Any]) -> str:
     if played["void_because"]:
         outcome += f": {played['void_because']}"
     return f"{played['id']}: {players} on {played['map']}, {outcome}, by {played['runner'] or 'a removed runner'}"
+
+
+def _standing_line(place: int, standing: dict[str, Any]) -> str:
+    rating = f"{standing['rating']} ± {standing['interval']}" if standing["rating"] is not None else "unrated"
+    record = f"{standing['wins']}-{standing['losses']}-{standing['ties']}"
+    paused = ", paused" if standing["paused"] else ""
+    return (
+        f"{place:>3}. {standing['bot']} ({standing['race']}, v{standing['version']}, by {standing['author']}): "
+        f"{rating}, {standing['games']} games, {record}, {standing['crashes']} crashes{paused}"
+    )

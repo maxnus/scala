@@ -1,6 +1,24 @@
 {% extends "base.html" %}
 {% block main %}
-  <h1>Scala</h1>
-  <p>StarCraft II ladders between bots, played on runners their members contribute.</p>
-  <p>The ladders come here soon. Meanwhile, sign in and make a token for the <code>sc2scala</code> command.</p>
+  <h1>Ladders</h1>
+  <p class="lead">StarCraft II ladders between bots, played on runners their members contribute.</p>
+  {% if ladders %}
+    <div class="scrolls">
+    <table>
+      <thead><tr><th>Ladder</th><th>Owner</th><th class="number">Bots</th><th></th></tr></thead>
+      <tbody>
+        {% for ladder in ladders %}
+          <tr>
+            <td>{% if ladder.visible %}<a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>{% else %}{{ ladder.name }}{% endif %}</td>
+            <td>{{ ladder.owner }}</td>
+            <td class="number">{% if ladder.visible %}{{ ladder.bots }}{% endif %}</td>
+            <td class="muted">{% if ladder.protected %}protected{% if not ladder.visible %}: join with <code>sc2scala ladder join {{ ladder.name }}</code>{% endif %}{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p>No ladder yet. Make one with <code>sc2scala ladder create</code>.</p>
+  {% endif %}
 {% endblock %}

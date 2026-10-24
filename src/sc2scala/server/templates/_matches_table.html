@@ -1,0 +1,24 @@
+{% if matches %}
+  <div class="scrolls">
+  <table>
+    <thead><tr><th class="number">Match</th><th>Players</th><th>Map</th><th>Outcome</th><th class="number">Game time</th><th>Drawn</th><th></th></tr></thead>
+    <tbody>
+      {% for match in matches %}
+        <tr>
+          <td class="number"><a href="/matches/{{ match.id }}">{{ match.id }}</a></td>
+          <td>
+            {% for player in match.players %}<a href="/bots/{{ player.bot }}">{{ player.bot }}</a> <span class="muted">v{{ player.version }}</span>{% if not loop.last %} vs {% endif %}{% endfor %}
+          </td>
+          <td>{{ match.map }}</td>
+          <td class="outcome outcome-{{ match.status }}">{{ match.outcome }}</td>
+          <td class="number">{{ match.game_steps | game_time }}</td>
+          <td class="muted when">{{ match.drawn | when }}</td>
+          <td>{% if match.replay %}<a href="/matches/{{ match.id }}/replay">replay</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% else %}
+  <p class="muted">No match yet.</p>
+{% endif %}

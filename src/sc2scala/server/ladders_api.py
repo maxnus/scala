@@ -13,6 +13,7 @@ from sc2scala.errors import UploadRefusedError
 from sc2scala.server.bots_api import bot_named, commit_or_conflict
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import limits_changed
+from sc2scala.server.ladder_ratings import Standing, standings
 from sc2scala.server.models import Ladder, LadderEntry, LadderMember, MapFile, User
 from sc2scala.server.passwords import hash_of_password, password_matches
 from sc2scala.server.upload_checks import MAP_SUFFIX, check_map, map_name_of
@@ -203,24 +204,48 @@ def resume_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name:
     return ladder_details(entry.ladder, user)
 
 
+@router.get("/{name}/standings")
+def ladder_standings(session: DatabaseSession, user: TokenUser, name: str) -> list[dict[str, Any]]:
+    """The ladder's entered bots by their latest versions' ratings, the unrated last."""
+    return [standing_summary(standing) for standing in standings(session, visible_ladder(session, name, user))]
+
+
+def standing_summary(standing: Standing) -> dict[str, Any]:
+    rating = standing.rating
+    return {
+        "bot": standing.entry.bot.name,
+        "author": standing.entry.bot.owner.login,
+        "race": standing.entry.bot.race,
+        "version": standing.version.number,
+        "rating": standing.displayed_rating,
+        "interval": standing.interval,
+        "games": rating.games if rating else 0,
+        "wins": rating.wins if rating else 0,
+        "losses": rating.losses if rating else 0,
+        "ties": rating.ties if rating else 0,
+        "crashes": rating.crashes if rating else 0,
+        "paused": standing.entry.paused,
+    }
+
+
 def ladder_named(session: Session, name: str) -> Ladder | None:
     """The ladder named `name`, in any case."""
     return session.scalar(select(Ladder).where(func.lower(Ladder.name) == name.lower()))
 
 
-def is_member(ladder: Ladder, user: User) -> bool:
-    return any(member.user_id == user.id for member in ladder.members)
+def is_member(ladder: Ladder, user: User | None) -> bool:
+    return user is not None and any(member.user_id == user.id for member in ladder.members)
 
 
-def visible_ladder(session: Session, name: str, user: User) -> Ladder:
-    """The ladder named `name`; 404 if there is none, and 403 if it is protected and the user no member."""
+def visible_ladder(session: Session, name: str, user: User | None) -> Ladder:
+    """The ladder named `name`; 404 if there is none, and 403 if it is protected and the user, if any, no member."""
     ladder = _existing_ladder(session, name)
     if ladder.is_protected and not is_member(ladder, user):
         raise HTTPException(403, f"{ladder.name} is protected: join it with its password first")
     return ladder
 
 
-def ladder_summary(ladder: Ladder, user: User) -> dict[str, Any]:
+def ladder_summary(ladder: Ladder, user: User | None) -> dict[str, Any]:
     summary: dict[str, Any] = {"name": ladder.name, "owner": ladder.owner.login, "protected": ladder.is_protected}
     if not ladder.is_protected or is_member(ladder, user):
         summary |= {"maps": len(ladder.maps), "bots": len(ladder.entries), "member": is_member(ladder, user)}

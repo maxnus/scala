@@ -255,3 +255,23 @@ class MatchRecord(Base):
     @property
     def versions(self) -> tuple[BotVersion, BotVersion]:
         return self.player_1_version, self.player_2_version
+
+
+class Rating(Base):
+    """A bot version's rating in a ladder, as last fitted, in Elo points about the ladder's mean, with its standard
+    error and the games it counted."""
+
+    __tablename__ = "ratings"
+
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), primary_key=True)
+    rating: Mapped[float]
+    standard_error: Mapped[float]
+    games: Mapped[int]
+    wins: Mapped[int]
+    losses: Mapped[int]
+    ties: Mapped[int]
+    crashes: Mapped[int]
+    fitted_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+
+    version: Mapped[BotVersion] = relationship()

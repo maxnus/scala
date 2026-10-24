@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Matches of {{ ladder.name }} · Scala{% endblock %}
+{% block main %}
+  <h1>Matches of <a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a></h1>
+  {% include "_matches_table.html" %}
+  {% if earlier %}<p><a href="/ladders/{{ ladder.name }}/matches?before={{ earlier }}">Earlier matches</a></p>{% endif %}
+{% endblock %}

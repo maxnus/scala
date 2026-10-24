@@ -99,8 +99,9 @@ logs. A replay is for anyone who can see the ladder, and a bot's log for its aut
 
 The fit is Bradley-Terry: bot A beats bot B with probability `1 / (1 + 10^((R_B - R_A) / 400))`. It is the most likely
 set of ratings under a normal prior centered on the ladder's mean, which keeps a bot of few games near the middle, and
-each rating's interval comes from the fit's curvature. The prior's width is chosen in step 3 against AI Arena's results
-from [the matchmaking prototype](https://github.com/maxnus/sc2-matchmaking-prototype). A refit of a few thousand games
+each rating's interval comes from the fit's curvature, about the ladder's mean. The prior's width, 100 Elo points, was
+chosen in step 3 as the one that best predicted AI Arena's 2026 season, from
+[the matchmaking prototype](https://github.com/maxnus/sc2-matchmaking-prototype)'s data. A refit of a few thousand games
 takes milliseconds. Since many match-ups are one-sided beyond what the ratings predict (the prototype's finding), a
 ladder's page also shows each pair's record.
 
@@ -166,15 +167,16 @@ Each step ends in something that runs, and is a pull request of its own.
    which sets how many runners a machine can take.
 2. **The sandbox.** Done: as above, tested by bots that try to break each wall. The rootless setup is documented, and
    not yet tried.
-3. **The server and one runner**, in four pull requests:
+3. **The server and one runner**, done, in four pull requests:
    - 3a, done: the server's config and database, sign-in with GitHub and the dev sign-in, tokens, and `sc2scala server`,
      `login`, `whoami` and `logout`.
    - 3b, done: bots and versions, ladders, maps and membership, and their commands. A bot's entry pauses after 5
      failed starts in a row, which 3c counts.
    - 3c, done: the matches as above, results, and `sc2scala runner`, which plays one match at a time, at any hour.
      An `InitializationError` counts as a failed start for both bots, since it names neither.
-   - 3d: ratings, the prior's width chosen on the prototype's AI Arena results, and each ladder's pages: standings,
-     matches with their replays, and each pair's record.
+   - 3d, done: ratings, the prior's width chosen on the prototype's AI Arena results (100 Elo points, by
+     `tools/choose_rating_prior.py`), and each ladder's pages: standings, matches with their replays, and each pair's
+     record.
 4. **Many runners, windows and deadlines.** The config file above, `runner stop`, a ladder's owner barring a runner
    and voiding its results, and pruning the runner's cache. The server voids matches past their deadline since 3c.
 5. **Windows.** An install guide for WSL2, tested on a Windows machine.

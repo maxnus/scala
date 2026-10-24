@@ -77,3 +77,21 @@ button.link { padding: 0; border: none; background: none; color: var(--accent); 
 .new-token { padding: 12px 16px; border: 1px solid var(--accent); border-radius: 8px; margin-bottom: 24px; }
 form.new-token-form, form.dev-sign-in { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 form.dev-sign-in p { flex-basis: 100%; margin: 0; color: var(--muted); }
+
+h1 a, h1 a:visited { color: inherit; }
+h2 { margin-top: 32px; }
+.lead { font-size: 18px; }
+.muted { color: var(--muted); }
+.note { color: var(--muted); font-size: 14px; max-width: 720px; }
+td.number, th.number { text-align: right; font-variant-numeric: tabular-nums; }
+tr.paused td { color: var(--muted); }
+.outcome-void, .outcome-leased { color: var(--muted); }
+.outcome-line { font-size: 20px; margin-top: 0; }
+table.facts { width: auto; }
+table.facts th { padding-right: 24px; }
+.scrolls { overflow-x: auto; }
+table.pairs td { white-space: nowrap; }
+table.pairs td.ahead { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+table.pairs td.behind { background: color-mix(in srgb, var(--muted) 14%, transparent); }
+section.owned { margin-top: 32px; }
+td.when, th { white-space: nowrap; }

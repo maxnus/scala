@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Match {{ match.id }} · Scala{% endblock %}
+{% block main %}
+  <h1>Match {{ match.id }}</h1>
+  <p class="outcome-line outcome-{{ match.status }}">{{ match.outcome[:1] | upper }}{{ match.outcome[1:] }}</p>
+  <table class="facts">
+    <tbody>
+      <tr><th>Ladder</th><td><a href="/ladders/{{ match.ladder }}">{{ match.ladder }}</a></td></tr>
+      {% for player in match.players %}
+        <tr>
+          <th>Player {{ loop.index }}</th>
+          <td><a href="/bots/{{ player.bot }}">{{ player.bot }}</a> version {{ player.version }}, {{ player.race }}, by {{ player.author }}
+            {% if loop.index in readable_logs %} · <a href="/matches/{{ match.id }}/logs/{{ loop.index }}">its logs</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      <tr><th>Map</th><td>{{ match.map }}</td></tr>
+      {% if match.game_steps %}<tr><th>Game time</th><td>{{ match.game_steps | game_time }}, {{ match.game_steps }} steps</td></tr>{% endif %}
+      <tr><th>Drawn</th><td>{{ match.drawn | when }}</td></tr>
+      {% if match.record.finished_at %}<tr><th>Ended</th><td>{{ match.record.finished_at | when }}</td></tr>{% endif %}
+      <tr><th>Runner</th><td>{{ match.runner or "a removed runner" }}</td></tr>
+      {% if match.replay %}<tr><th>Replay</th><td><a href="/matches/{{ match.id }}/replay">download</a></td></tr>{% endif %}
+      {% if engine_logs %}<tr><th>Engine</th><td><a href="/matches/{{ match.id }}/logs/engine">its logs</a></td></tr>{% endif %}
+    </tbody>
+  </table>
+{% endblock %}

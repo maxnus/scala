@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ class RecordingEngine:
         self.matches.append(match)
         if self.error is not None:
             raise self.error
-        output_folder.mkdir(parents=True)
+        output_folder.mkdir(parents=True, exist_ok=True)
         return MatchResult(
             code=ResultCode.PLAYER_2_WIN,
             game_steps=2240,
@@ -72,3 +73,32 @@ def test_a_bot_folder_that_is_not_there_is_refused(tmp_path: Path, play_argument
 def test_an_engine_that_cannot_play_fails_the_command(tmp_path: Path, play_arguments: list[str]) -> None:
     engine = RecordingEngine(error=EngineError("Docker is not installed"))
     assert main([*play_arguments, "--output", str(tmp_path / "out")], engine=engine) == 1
+
+
+def test_an_output_folder_that_holds_anything_is_refused(tmp_path: Path, play_arguments: list[str]) -> None:
+    output_folder = tmp_path / "out"
+    output_folder.mkdir()
+    (output_folder / "result.json").write_text("{}", encoding="utf-8")
+    engine = RecordingEngine()
+    with pytest.raises(SystemExit) as exit_info:
+        main([*play_arguments, "--output", str(output_folder)], engine=engine)
+    assert exit_info.value.code == 2
+    assert engine.matches == []
+
+
+def test_runs_started_in_the_same_second_write_to_folders_of_their_own(
+    tmp_path: Path, play_arguments: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ClockStoppedAtNoon:
+        @staticmethod
+        def now() -> datetime:
+            return datetime(2026, 10, 24, 12, 0, 0)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sc2scala.cli.datetime", ClockStoppedAtNoon)
+    assert main(play_arguments, engine=RecordingEngine()) == 0
+    assert main(play_arguments, engine=RecordingEngine()) == 0
+    assert sorted(folder.name for folder in (tmp_path / "matches").iterdir()) == [
+        "20261024-120000-basic_bot-vs-loser_bot",
+        "20261024-120000-basic_bot-vs-loser_bot-2",
+    ]

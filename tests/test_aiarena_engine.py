@@ -167,3 +167,16 @@ def test_an_output_folder_must_be_empty(tmp_path: Path, match: Match) -> None:
     (output_folder / "something").write_text("", encoding="utf-8")
     with pytest.raises(ValueError, match="not empty"):
         AiArenaEngine(run_command=FakeDocker(engine_result=_RESULT_OF_A_WIN)).play(match, output_folder=output_folder)
+
+
+def test_a_work_folder_that_cannot_be_removed_leaves_the_result(
+    tmp_path: Path, match: Match, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_to_remove(path: Path) -> None:
+        raise PermissionError(f"{path} belongs to root")
+
+    monkeypatch.setattr("sc2scala.aiarena_engine.shutil.rmtree", refuse_to_remove)
+    result = AiArenaEngine(run_command=FakeDocker(engine_result=_RESULT_OF_A_WIN)).play(
+        match, output_folder=tmp_path / "out"
+    )
+    assert result.code == ResultCode.PLAYER_1_WIN

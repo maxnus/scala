@@ -90,7 +90,10 @@ class AiArenaEngine:
         _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
         engine_result = _read_engine_result(work_folder / "results.json", compose_log=compose_log)
         if not self.keep_work_folder:
-            shutil.rmtree(work_folder)
+            try:
+                shutil.rmtree(work_folder)
+            except OSError as error:
+                logger.warning(f"Could not remove {work_folder}: {error}")
         return MatchResult(
             code=ResultCode(engine_result["type"]),
             game_steps=int(engine_result.get("game_steps", 0)),

@@ -2,10 +2,11 @@
 
     uv run python tools/measure_match.py BOT_FOLDER BOT_FOLDER --map MAP [--races RACE RACE] [--output FOLDER]
 
-It samples the cgroup of every container of a Compose project named `sc2scala-*` once a second, so play no other match
-on the machine meanwhile. It needs cgroup v2, as Ubuntu has it. Memory is what the cgroup charges, page cache included;
-a container's peak is the kernel's own `memory.peak`, the sum's peak the highest of the sums sampled, which the sum of
-the containers' peaks bounds from above.
+It lists the containers of Compose projects named `sc2scala-*` once a second, so play no other match on the machine
+meanwhile, and reads their cgroups four times a second. It needs cgroup v2, as Ubuntu has it. Memory is what the cgroup
+charges, page cache included; a container's peak is the kernel's own `memory.peak`, the sum's peak the highest of the
+sums sampled, which the sum of the containers' peaks bounds from above. A cgroup goes with its container, so a
+container's CPU misses what it took after the last reading, a quarter of a second at most.
 """
 
 import argparse
@@ -20,6 +21,7 @@ from sc2scala import AiArenaEngine, Bot, Match, MatchResult, Race
 _CGROUP_ROOT = Path("/sys/fs/cgroup")
 _PROJECT_PREFIX = "sc2scala-"
 _MEBIBYTE = 1024 * 1024
+_READINGS_PER_SECOND = 4
 
 
 @dataclass
@@ -40,13 +42,17 @@ class MatchUsage:
     summed_memory_peak_bytes: int = 0
     samples: int = 0
 
-    def sample(self) -> None:
+    def list_new_containers(self) -> None:
+        """Adds the running containers of the match not listed yet."""
         for container_id, service in _running_match_containers():
             if container_id not in self.containers:
                 cgroup = _cgroup_of(container_id)
                 if cgroup is None:
                     continue
                 self.containers[container_id] = ContainerUsage(service=service, cgroup=cgroup)
+
+    def sample(self) -> None:
+        """Reads the cgroup of each listed container."""
         summed_memory_bytes = 0
         for usage in self.containers.values():
             try:
@@ -141,13 +147,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("bots", nargs=2, type=Path, metavar="BOT_FOLDER")
     parser.add_argument("--map", required=True, type=Path, dest="map_file", metavar="MAP")
-    parser.add_argument("--races", nargs=2, default=["R", "R"], metavar="RACE", help="T, Z, P or R (default: R R)")
+    parser.add_argument(
+        "--races",
+        nargs=2,
+        type=Race.from_text,
+        default=[Race.RANDOM, Race.RANDOM],
+        metavar="RACE",
+        help="T, Z, P or R, or its name (default: R R)",
+    )
     parser.add_argument("--output", type=Path, default=Path("matches") / f"measured-{time.strftime('%Y%m%d-%H%M%S')}")
     args = parser.parse_args()
 
     match = Match(
-        player_1=Bot.from_folder(args.bots[0], race=Race(args.races[0].upper())),
-        player_2=Bot.from_folder(args.bots[1], race=Race(args.races[1].upper())),
+        player_1=Bot.from_folder(args.bots[0], race=args.races[0]),
+        player_2=Bot.from_folder(args.bots[1], race=args.races[1]),
         map_file=args.map_file,
     )
     usage = MatchUsage()
@@ -158,9 +171,13 @@ def main() -> None:
 
     player = threading.Thread(target=play)
     player.start()
+    readings = 0
     while player.is_alive():
+        if readings % _READINGS_PER_SECOND == 0:
+            usage.list_new_containers()
         usage.sample()
-        player.join(timeout=1.0)
+        readings += 1
+        player.join(timeout=1 / _READINGS_PER_SECOND)
     if "result" not in outcome:
         raise SystemExit("The match did not finish; see the error above")
     result = outcome["result"]

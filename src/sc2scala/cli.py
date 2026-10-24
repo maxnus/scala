@@ -30,9 +30,10 @@ def main(argv: Sequence[str] | None = None, *, engine: MatchEngine | None = None
     logger.add(sys.stderr, level="INFO")
     try:
         match = _match_from_arguments(args)
+        _check_is_empty_or_missing(args.output)
     except ValueError as error:
         parser.error(str(error))
-    output_folder = args.output or _default_output_folder(match)
+    output_folder = args.output or _new_default_output_folder(match)
     try:
         result = (engine or AiArenaEngine()).play(match, output_folder=output_folder)
     except EngineError as error:
@@ -72,10 +73,10 @@ def _command_line_parser() -> argparse.ArgumentParser:
 
 
 def _race_from_text(text: str) -> Race:
-    for race in Race:
-        if text.upper() in (race.value, race.name):
-            return race
-    raise argparse.ArgumentTypeError(f"{text!r} is no race: T, Z, P or R, or its name")
+    try:
+        return Race.from_text(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def _match_from_arguments(args: argparse.Namespace) -> Match:
@@ -90,9 +91,28 @@ def _match_from_arguments(args: argparse.Namespace) -> Match:
     return Match(player_1=player_1, player_2=player_2, map_file=args.map_file)
 
 
-def _default_output_folder(match: Match) -> Path:
+def _check_is_empty_or_missing(output_folder: Path | None) -> None:
+    """Raises `ValueError` if `output_folder` is a file or a folder that holds anything."""
+    if output_folder is None or not output_folder.exists():
+        return
+    if not output_folder.is_dir() or any(output_folder.iterdir()):
+        raise ValueError(f"{output_folder} is not an empty folder")
+
+
+def _new_default_output_folder(match: Match) -> Path:
+    """Creates and returns `<time>-<bot>-vs-<bot>` under the default root, with `-2`, `-3` and so on appended while
+    another run has made that folder already."""
     started = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return _DEFAULT_OUTPUT_ROOT / f"{started}-{match.player_1.name}-vs-{match.player_2.name}"
+    base_name = f"{started}-{match.player_1.name}-vs-{match.player_2.name}"
+    attempt = 1
+    while True:
+        output_folder = _DEFAULT_OUTPUT_ROOT / (base_name if attempt == 1 else f"{base_name}-{attempt}")
+        try:
+            output_folder.mkdir(parents=True)
+        except FileExistsError:
+            attempt += 1
+            continue
+        return output_folder
 
 
 def _write_result_file(match: Match, result: MatchResult, result_file: Path) -> None:

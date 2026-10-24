@@ -11,6 +11,7 @@ from sc2scala.errors import ScalaError
 from sc2scala.ladder_commands import add_ladder_commands, run_ladder_command
 from sc2scala.match_engine import MatchEngine
 from sc2scala.play_command import add_play_command, run_play
+from sc2scala.runner_commands import add_runner_commands, run_runner_command
 from sc2scala.server_command import add_server_command, run_server
 
 
@@ -41,6 +42,8 @@ def main(
                 return run_bot_command(args, http=http)
             case "ladder":
                 return run_ladder_command(args, http=http)
+            case "runner":
+                return run_runner_command(args, http=http, engine=engine)
             case _:
                 parser.error(f"unknown command {args.command}")
     except ScalaError as error:
@@ -55,5 +58,6 @@ def _command_line_parser() -> argparse.ArgumentParser:
     add_account_commands(commands.add_parser)
     add_bot_commands(commands.add_parser)
     add_ladder_commands(commands.add_parser)
+    add_runner_commands(commands.add_parser)
     add_server_command(commands.add_parser)
     return parser

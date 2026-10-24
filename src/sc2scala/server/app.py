@@ -1,3 +1,4 @@
+import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,7 +12,16 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from sc2scala.__about__ import __version__
 from sc2scala.errors import SignInError, UploadRefusedError, UploadTooLargeError
-from sc2scala.server import account_routes, api_routes, bots_api, ladders_api, sign_in_routes
+from sc2scala.server import (
+    account_routes,
+    api_routes,
+    bots_api,
+    ladders_api,
+    matches_api,
+    runner_api,
+    runners_api,
+    sign_in_routes,
+)
 from sc2scala.server.database import create_database_engine, upgrade_database
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.github_accounts import GitHubAccounts
@@ -43,6 +53,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.state.engine = engine
     app.state.templates = Jinja2Templates(directory=_PACKAGE_FOLDER / "templates")
     app.state.file_store = FileStore(config.data_folder / _FILES_FOLDER_NAME)
+    app.state.match_random = random.SystemRandom()
     if github_accounts is None and config.github_sign_in:
         github_accounts = GitHubOAuthApp(client_id=config.github_client_id, client_secret=config.github_client_secret)
     app.state.github_accounts = github_accounts
@@ -60,6 +71,9 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(api_routes.router)
     app.include_router(bots_api.router)
     app.include_router(ladders_api.router)
+    app.include_router(runners_api.router)
+    app.include_router(runner_api.router)
+    app.include_router(matches_api.router)
 
     @app.get("/", response_class=HTMLResponse)
     def home_page(request: Request, session: DatabaseSession) -> HTMLResponse:

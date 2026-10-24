@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from sc2scala.bot_archive import type_of_bot_archive
 from sc2scala.bot_type import BotType
 from sc2scala.errors import UploadRefusedError, UploadTooLargeError
 from sc2scala.server.bots_api import commit_or_conflict
@@ -15,7 +16,6 @@ from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import LimitRefusedError, limits_changed
 from sc2scala.server.models import User
 from sc2scala.server.passwords import hash_of_password, password_matches
-from sc2scala.server.upload_checks import type_of_bot_archive
 from tests.conftest import server_config_in, zip_of
 
 

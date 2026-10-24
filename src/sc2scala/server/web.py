@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from sc2scala.server.api_tokens import hash_of_token
-from sc2scala.server.models import ApiToken, User, utc_now
+from sc2scala.server.models import ApiToken, RunnerMachine, User, utc_now
 
 _CSRF_SESSION_KEY = "csrf_token"
 _USER_SESSION_KEY = "user_id"
@@ -67,6 +67,24 @@ def token_user(request: Request, session: DatabaseSession) -> User:
         api_token.last_used_at = now
         session.commit()
     return api_token.user
+
+
+def runner_machine(request: Request, session: DatabaseSession) -> RunnerMachine:
+    """The runner machine whose token the request bears as `Authorization: Bearer <token>`; 401 if none that is valid.
+
+    The machine's time of last contact is brought up to date, to the minute.
+    """
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    machine = None
+    if scheme.lower() == "bearer" and token:
+        machine = session.scalar(select(RunnerMachine).where(RunnerMachine.token_hash == hash_of_token(token.strip())))
+    if machine is None:
+        raise HTTPException(status_code=401, detail="No valid runner token", headers={"WWW-Authenticate": "Bearer"})
+    now = utc_now()
+    if machine.last_seen_at is None or now - machine.last_seen_at > _LAST_USE_PRECISION:
+        machine.last_seen_at = now
+        session.commit()
+    return machine
 
 
 def sign_in_as(request: Request, user: User) -> None:

@@ -187,3 +187,71 @@ class LadderEntry(Base):
 
     ladder: Mapped[Ladder] = relationship(back_populates="entries")
     bot: Mapped[BotRecord] = relationship()
+
+
+runner_machine_ladders = Table(
+    "runner_machine_ladders",
+    Base.metadata,
+    Column("machine_id", ForeignKey("runner_machines.id", ondelete="CASCADE"), primary_key=True),
+    Column("ladder_id", ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class RunnerMachine(Base):
+    """A machine whose runners play matches for its owner: every public ladder if `serves_public`, and the ladders it
+    lists, a protected one only while its owner is a member. It acts by a token of its own, kept as its hash."""
+
+    __tablename__ = "runner_machines"
+    __table_args__ = (UniqueConstraint("owner_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(40))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    serves_public: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    last_seen_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+    owner: Mapped[User] = relationship()
+    ladders: Mapped[list[Ladder]] = relationship(secondary=runner_machine_ladders, order_by=Ladder.name)
+
+
+class MatchRecord(Base):
+    """A match drawn for a runner: leased to it until `deadline`, then finished with its result, or void.
+
+    Each seat holds the bot's version and the race it played; the files a runner uploaded are kept by their SHA-256.
+    """
+
+    __tablename__ = "matches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), index=True)
+    map_id: Mapped[int] = mapped_column(ForeignKey("maps.id"))
+    player_1_version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), index=True)
+    player_2_version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), index=True)
+    player_1_race: Mapped[str] = mapped_column(String(1))
+    player_2_race: Mapped[str] = mapped_column(String(1))
+    machine_id: Mapped[int | None] = mapped_column(ForeignKey("runner_machines.id", ondelete="SET NULL"), index=True)
+    status: Mapped[str] = mapped_column(String(10), index=True)
+    drawn_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    deadline: Mapped[datetime] = mapped_column(UtcDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    void_because: Mapped[str | None] = mapped_column(String(300))
+    result: Mapped[str | None] = mapped_column(String(30))
+    game_steps: Mapped[int | None]
+    player_1_average_step_time: Mapped[float | None]
+    player_2_average_step_time: Mapped[float | None]
+    replay_sha256: Mapped[str | None] = mapped_column(String(64))
+    player_1_logs_sha256: Mapped[str | None] = mapped_column(String(64))
+    player_2_logs_sha256: Mapped[str | None] = mapped_column(String(64))
+    engine_logs_sha256: Mapped[str | None] = mapped_column(String(64))
+
+    ladder: Mapped[Ladder] = relationship()
+    map_file: Mapped[MapFile] = relationship()
+    player_1_version: Mapped[BotVersion] = relationship(foreign_keys=[player_1_version_id])
+    player_2_version: Mapped[BotVersion] = relationship(foreign_keys=[player_2_version_id])
+    machine: Mapped[RunnerMachine | None] = relationship()
+
+    @property
+    def versions(self) -> tuple[BotVersion, BotVersion]:
+        return self.player_1_version, self.player_2_version

@@ -54,6 +54,21 @@ uv run sc2scala ladder show night-league
 `--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala bot --help` and
 `sc2scala ladder --help` list the rest.
 
+## Running matches
+
+A machine with Docker plays the matches the server draws for it, one at a time, once registered as a runner machine
+of yours, which serves every public ladder, or the ladders named:
+
+```bash
+uv run sc2scala runner register my-desk
+uv run sc2scala runner start
+```
+
+`runner start` downloads the engine's images first if Docker lacks them, about 11 GB. It keeps bots and maps in
+`~/.cache/sc2scala`, plays each match in `~/.local/share/sc2scala/work`, and reports its result, replay and logs.
+`sc2scala ladder matches LADDER` lists a ladder's latest matches. A runner that plays strangers' bots should run as a
+user of its own, as [the sandbox](docs/sandbox.md) says.
+
 ## Developing
 
 | Task | Command |

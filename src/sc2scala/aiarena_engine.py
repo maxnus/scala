@@ -59,6 +59,18 @@ class AiArenaEngine:
         self.rootless = rootless
         self._run_command = run_command
 
+    @property
+    def images(self) -> list[str]:
+        """The engine's Docker images, at its tag."""
+        return [f"aiarena/arenaclient-{part}:{self.image_tag}" for part in ("sc2", "bot", "proxy")]
+
+    def pull_images(self, *, log_file: Path) -> None:
+        """Downloads the engine's images that Docker lacks, about 11 GB at first; raises `EngineError` if it cannot."""
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        for image in self.images:
+            if self._run_command(["docker", "pull", "--quiet", image], timeout=None, log_file=log_file) != 0:
+                raise EngineError(f"Docker could not pull {image}; see {log_file}")
+
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         """Plays `match` as `MatchEngine.play` says.
 

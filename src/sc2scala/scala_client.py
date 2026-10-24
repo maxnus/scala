@@ -1,3 +1,4 @@
+import hashlib
 import json
 from collections.abc import Sequence
 from contextlib import ExitStack
@@ -15,7 +16,7 @@ _UPLOAD_TIMEOUT_SECONDS = 600
 
 
 class ScalaClient:
-    """Calls a Scala server's API with a user's token.
+    """Calls a Scala server's API with a token: a user's, or a runner machine's for the calls of a runner.
 
     Raises `ServerError` for a server that cannot be reached, refuses the token, or answers with an error.
     """
@@ -96,25 +97,99 @@ class ScalaClient:
     def resume_entry(self, ladder: str, bot: str) -> dict[str, Any]:
         return self._request("POST", f"/api/ladders/{ladder}/entries/{bot}/resume")
 
-    def _request(self, method: str, path: str, **content: Any) -> Any:
+    def register_machine(self, name: str, *, serves_public: bool, ladders: Sequence[str]) -> dict[str, Any]:
+        """Registers a runner machine of the user's; the answer holds its token, once."""
+        return self._request(
+            "POST", "/api/runners", json={"name": name, "serves_public": serves_public, "ladders": list(ladders)}
+        )
+
+    def my_machines(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/api/runners")
+
+    def change_machine(self, name: str, *, serves_public: bool | None, ladders: Sequence[str] | None) -> dict[str, Any]:
+        changes = {"serves_public": serves_public, "ladders": list(ladders) if ladders is not None else None}
+        return self._request("PATCH", f"/api/runners/{name}", json=changes)
+
+    def remove_machine(self, name: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/api/runners/{name}")
+
+    def ladder_matches(self, name: str, *, limit: int) -> list[dict[str, Any]]:
+        return self._request("GET", f"/api/ladders/{name}/matches", params={"limit": limit})
+
+    def next_match(self) -> dict[str, Any] | None:
+        """A match for this runner machine to play, or `None` if there is none."""
+        return self._request("POST", "/api/runner/matches")
+
+    def download(self, kind: str, sha256: str, destination: Path) -> None:
+        """Downloads the runner's file of `kind`, `bots` or `maps`, to `destination`, and checks its SHA-256.
+
+        Raises `ServerError` if the file is not what its hash says.
+        """
+        digest = hashlib.sha256()
+        partial = destination.with_name(destination.name + ".partial")
         try:
-            response = self._http.request(
-                method,
-                self.server_url + path,
-                headers={"Authorization": f"Bearer {self._token}"},
-                **content,
-            )
+            with (
+                self._http.stream(
+                    "GET", f"{self.server_url}/api/runner/{kind}/{sha256}", headers=self._authorization()
+                ) as response,
+                partial.open("wb") as downloaded,
+            ):
+                self._raise_for_error(response)
+                for chunk in response.iter_bytes():
+                    digest.update(chunk)
+                    downloaded.write(chunk)
         except httpx.HTTPError as error:
+            partial.unlink(missing_ok=True)
             raise ServerError(f"{self.server_url} could not be reached: {error}") from error
+        if digest.hexdigest() != sha256:
+            partial.unlink(missing_ok=True)
+            raise ServerError(f"The {kind} file {sha256[:12]} came with another hash")
+        partial.replace(destination)
+
+    def report_result(self, match_id: int, result: dict[str, Any], *, files: dict[str, Path]) -> dict[str, Any]:
+        """Reports a match's result, a JSON object, and uploads `files`: `replay`, `player_1_logs`, `player_2_logs`
+        and `engine_logs`, each that exists."""
+        with ExitStack() as stack:
+            uploads = {
+                field: (path.name, stack.enter_context(path.open("rb")), "application/octet-stream")
+                for field, path in files.items()
+                if path.is_file()
+            }
+            return self._request(
+                "POST", f"/api/runner/matches/{match_id}/result", data={"result": json.dumps(result)}, files=uploads
+            )
+
+    def report_failure(self, match_id: int, reason: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/runner/matches/{match_id}/failure", json={"reason": reason})
+
+    def _authorization(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"}
+
+    def _raise_for_error(self, response: httpx.Response) -> None:
         if response.status_code == 401:
             raise ServerError(
                 f"{self.server_url} refused the token: make one on {self.server_url}/account", status_code=401
             )
         if response.is_error:
+            response.read()
             raise ServerError(
                 f"{self.server_url} answered {response.status_code}: {_detail_of(response)}",
                 status_code=response.status_code,
             )
+
+    def _request(self, method: str, path: str, **content: Any) -> Any:
+        try:
+            response = self._http.request(
+                method,
+                self.server_url + path,
+                headers=self._authorization(),
+                **content,
+            )
+        except httpx.HTTPError as error:
+            raise ServerError(f"{self.server_url} could not be reached: {error}") from error
+        self._raise_for_error(response)
+        if response.status_code == 204:
+            return None
         return response.json()
 
 

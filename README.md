@@ -18,9 +18,9 @@ uv run sc2scala play path/to/MyBot path/to/OtherBot --map path/to/PylonAIE_v4.SC
 ```
 
 A bot is a folder named for it, in AI Arena's layout: `run.py` for a Python bot, `<name>.dll`, `<name>.jar`,
-`<name>.js` or a binary `<name>` for the others. A Windows bot, `<name>.exe`, does not play yet. The match is written to `matches/<time>-<bot>-vs-<bot>`,
-or the empty folder `--output` names: `result.json`, the replay, and `logs`, which holds each bot's own logs in
-`player_1-<name>` and `player_2-<name>`, and the engine's.
+`<name>.js` or a binary `<name>` for the others. A Windows bot, `<name>.exe`, does not play yet. The match is written
+to `matches/<time>-<bot>-vs-<bot>`, or the empty folder `--output` names: `result.json`, the replay, and `logs`, which
+holds each bot's own logs in `player_1-<name>` and `player_2-<name>`, and the engine's.
 
 ## Developing
 

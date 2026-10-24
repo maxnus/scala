@@ -143,22 +143,50 @@ def remove_map(session: DatabaseSession, user: TokenUser, name: str, map_name: s
 @router.post("/{name}/join")
 def join_ladder(session: DatabaseSession, user: TokenUser, name: str, join: JoinRequest) -> dict[str, Any]:
     """Makes the user a member of a protected ladder, given its password; a public ladder needs no joining."""
-    ladder = _existing_ladder(session, name)
-    if ladder.password_hash is not None and not is_member(ladder, user):
-        if not password_matches(join.password, ladder.password_hash):
-            raise HTTPException(403, f"That is not {ladder.name}'s password")
-        ladder.members.append(LadderMember(user_id=user.id))
-        session.commit()
-    return ladder_details(ladder, user)
+    return ladder_details(join_with_password(session, user, name, join.password), user)
 
 
 @router.post("/{name}/entries")
 def enter_bot(session: DatabaseSession, user: TokenUser, name: str, entry: EntryRequest) -> dict[str, Any]:
     """Enters a bot of the user's in the ladder, which then plays its latest version there."""
+    return ladder_details(enter(session, user, name, entry.bot), user)
+
+
+@router.delete("/{name}/entries/{bot_name}")
+def withdraw_bot(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
+    """Takes a bot out of the ladder, for the bot's author or the ladder's owner."""
+    return ladder_details(withdraw(session, user, name, bot_name), user)
+
+
+@router.post("/{name}/entries/{bot_name}/pause")
+def pause_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
+    return ladder_details(pause(session, user, name, bot_name).ladder, user)
+
+
+@router.post("/{name}/entries/{bot_name}/resume")
+def resume_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
+    """Lets a paused entry play again, its count of failed starts begun anew."""
+    return ladder_details(resume(session, user, name, bot_name).ladder, user)
+
+
+def join_with_password(session: Session, user: User, name: str, password: str) -> Ladder:
+    """The ladder, which the user joins if it is protected and `password` is its own; 403 if it is not."""
+    ladder = _existing_ladder(session, name)
+    if ladder.password_hash is not None and not is_member(ladder, user):
+        if not password_matches(password, ladder.password_hash):
+            raise HTTPException(403, f"That is not {ladder.name}'s password")
+        ladder.members.append(LadderMember(user_id=user.id))
+        session.commit()
+    return ladder
+
+
+def enter(session: Session, user: User, name: str, bot_name: str) -> Ladder:
+    """Enters the user's bot in the ladder, whose member the user becomes; 403 for another's bot, 409 for a bot with no
+    version or in the ladder already."""
     ladder = visible_ladder(session, name, user)
-    bot = bot_named(session, entry.bot)
+    bot = bot_named(session, bot_name)
     if bot is None or bot.owner_id != user.id:
-        raise HTTPException(403, f"You have no bot named {entry.bot}")
+        raise HTTPException(403, f"You have no bot named {bot_name}")
     if bot.latest_version is None:
         raise HTTPException(409, f"{bot.name} has no version to play")
     if any(existing.bot_id == bot.id for existing in ladder.entries):
@@ -167,41 +195,49 @@ def enter_bot(session: DatabaseSession, user: TokenUser, name: str, entry: Entry
     if not is_member(ladder, user):
         ladder.members.append(LadderMember(user_id=user.id))
     session.commit()
-    return ladder_details(ladder, user)
+    return ladder
 
 
-@router.delete("/{name}/entries/{bot_name}")
-def withdraw_bot(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
-    """Takes a bot out of the ladder, for the bot's author or the ladder's owner."""
+def withdraw(session: Session, user: User, name: str, bot_name: str) -> Ladder:
+    """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else."""
     ladder = visible_ladder(session, name, user)
     entry = _entry_of(ladder, bot_name)
-    if user.id not in (entry.bot.owner_id, ladder.owner_id):
+    if not may_withdraw(entry, user):
         raise HTTPException(
             403, f"{entry.bot.name} is {entry.bot.owner.login}'s to withdraw, or {ladder.owner.login}'s"
         )
     ladder.entries.remove(entry)
     session.commit()
-    return ladder_details(ladder, user)
+    return ladder
 
 
-@router.post("/{name}/entries/{bot_name}/pause")
-def pause_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
+def pause(session: Session, user: User, name: str, bot_name: str) -> LadderEntry:
+    """Pauses the author's entry; 403 for anyone else."""
     entry = _authors_entry(session, name, bot_name, user)
     entry.paused = True
     entry.paused_because = f"paused by {user.login}"
     session.commit()
-    return ladder_details(entry.ladder, user)
+    return entry
 
 
-@router.post("/{name}/entries/{bot_name}/resume")
-def resume_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
-    """Lets a paused entry play again, its count of failed starts begun anew."""
+def resume(session: Session, user: User, name: str, bot_name: str) -> LadderEntry:
+    """Lets the author's paused entry play again, its count of failed starts begun anew; 403 for anyone else."""
     entry = _authors_entry(session, name, bot_name, user)
     entry.paused = False
     entry.paused_because = None
     entry.failed_starts_in_a_row = 0
     session.commit()
-    return ladder_details(entry.ladder, user)
+    return entry
+
+
+def may_withdraw(entry: LadderEntry, user: User | None) -> bool:
+    """Whether `user` may take the entry out of its ladder: its bot's author or the ladder's owner."""
+    return user is not None and user.id in (entry.bot.owner_id, entry.ladder.owner_id)
+
+
+def may_enter(ladder: Ladder, user: User | None) -> bool:
+    """Whether `user` may enter bots in the ladder: anyone signed in in a public one, its members in a protected one."""
+    return user is not None and (not ladder.is_protected or is_member(ladder, user))
 
 
 @router.get("/{name}/standings")

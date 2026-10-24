@@ -42,7 +42,9 @@ uv run sc2scala login http://127.0.0.1:8000
 
 ## Bots and ladders
 
-Signed in to a server, upload a bot's folder, or its zip, as its next version, and make, join and enter ladders:
+Signed in on a server's pages, upload a bot as a zip from your page, and its next versions from the bot's own page.
+Enter it, pause it and withdraw it on a ladder's page, or on the bot's; a protected ladder's page asks for its password
+first. The CLI does the same, and takes a bot's folder as well as its zip:
 
 ```bash
 uv run sc2scala bot upload MyBot path/to/MyBot --race T

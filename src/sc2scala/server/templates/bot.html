@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_forms.html" import entry_actions, race_options, zip_note %}
 {% block title %}{{ bot.name }} · Scala{% endblock %}
 {% block main %}
   <h1>{{ bot.name }}</h1>
@@ -7,7 +8,7 @@
   {% if ladders %}
     <div class="scrolls">
     <table>
-      <thead><tr><th>Ladder</th><th class="number">Rating</th><th class="number">Games</th><th></th></tr></thead>
+      <thead><tr><th>Ladder</th><th class="number">Rating</th><th class="number">Games</th><th></th>{% if is_author %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for entry in ladders %}
           {% set standing = entry.standing %}
@@ -15,7 +16,8 @@
             <td><a href="/ladders/{{ entry.ladder.name }}">{{ entry.ladder.name }}</a></td>
             <td class="number">{% if standing and standing.rating %}{{ standing.displayed_rating }} <span class="muted">± {{ standing.interval }}</span>{% else %}<span class="muted">unrated</span>{% endif %}</td>
             <td class="number">{{ standing.rating.games if standing and standing.rating else 0 }}</td>
-            <td class="muted">{% if standing and standing.entry.paused %}paused: {{ standing.entry.paused_because }}{% endif %}</td>
+            <td class="muted">{{ entry.entry.paused_note }}</td>
+            {% if is_author %}<td class="actions">{{ entry_actions(entry.entry, user, csrf_token, request.url.path, true) }}</td>{% endif %}
           </tr>
         {% endfor %}
       </tbody>
@@ -24,7 +26,23 @@
   {% else %}
     <p class="muted">In no ladder you may see.</p>
   {% endif %}
+  {% if enterable_ladders %}
+    <form method="post" action="/bots/{{ bot.name }}/entries" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Ladder <select name="ladder">{% for ladder in enterable_ladders %}<option>{{ ladder.name }}</option>{% endfor %}</select></label>
+      <button type="submit">Enter {{ bot.name }}</button>
+    </form>
+  {% endif %}
   <h2>Versions</h2>
+  {% if is_author %}
+    <form method="post" action="/bots/{{ bot.name }}/versions" enctype="multipart/form-data" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Zip <input type="file" name="archive" accept=".zip,application/zip" required></label>
+      <label>Race <select name="race">{{ race_options(races, "", keep="keep " ~ bot.race) }}</select></label>
+      <button type="submit">Upload a new version</button>
+    </form>
+    {{ zip_note() }}
+  {% endif %}
   <table>
     <thead><tr><th class="number">Version</th><th>Type</th><th class="number">Size</th><th>Uploaded</th></tr></thead>
     <tbody>

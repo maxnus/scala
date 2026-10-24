@@ -37,15 +37,16 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 7. **People sign in with GitHub** (the owner, 2026-10-24, for step 3). The server keeps no passwords; the CLI and the
    runners act for a user with tokens made on the account page and kept as hashes. A dev sign-in by any name serves
    tests and a server on one's own machine, and is refused unless the server listens on a local address.
-8. **The server renders its pages**, with no JavaScript build. In step 3 they only show; what changes something goes
-   through the CLI.
+8. **The server renders its pages**, with no JavaScript build, and people do in them everything but run a runner
+   (the owner, 2026-10-24, reversing step 3's pages that only showed): a bot's author needs no install. The CLI does
+   the same through the API, and runs the runners.
 
 ## Design
 
 ### Bots
 
 A bot is a name, a race (Terran, Zerg, Protoss or random), AI Arena's type for it and an upload, a zip in AI Arena's
-layout. Scala reads the type from the first of these the bot's folder holds (`BotType.from_folder`), and the engine
+layout, its files at the zip's root or in the one folder it holds. Scala reads the type from the first of these the bot's folder holds (`BotType.from_folder`), and the engine
 starts the bot as its type says:
 
 | The folder holds | Started as | AI Arena's type |
@@ -169,8 +170,9 @@ lands as a user who owns nothing of its owner's.
 ### The server
 
 Python, FastAPI, PostgreSQL in deployment and SQLite in tests, and files on disk: bot versions, maps, replays and logs.
-The app's commands (`sc2scala bot upload`, `sc2scala ladder create`, `sc2scala ladder join`) and the runners call the
-same HTTP API, with a token of the user's.
+The pages' forms, signed in, and the app's commands (`sc2scala bot upload`, `sc2scala ladder create`, `sc2scala ladder
+join`) and the runners, by a token of the user's, do the same through functions they share: each form calls what its
+API route calls.
 
 ### Testing
 
@@ -203,7 +205,13 @@ Each step ends in something that runs, and is a pull request of its own.
 5. **Windows.** Done, untested: [a guide to a runner in WSL2](wsl2.md), written from Microsoft's documentation of WSL,
    since no Windows machine was at hand (the owner, 2026-10-24). The first runner on Windows tests it, and its report
    corrects it.
-6. **The first public server**, on the owner's VPS.
+6. **The browser**: everything but running a runner done in the pages, in three pull requests.
+   - 6a, done: bots and entries: a new bot and its versions, joining a protected ladder, and entering, pausing,
+     resuming and withdrawing bots. A zip of the bot's folder itself is read as that folder.
+   - 6b: ladders and runners, for their owners: making a ladder and changing it, a ladder's runners and barring them,
+     and which ladders one's machines serve.
+   - 6c: `sc2scala login` signed in through the browser, and the README begun in the browser.
+7. **The first public server**, on the owner's VPS.
 
 ## Open
 

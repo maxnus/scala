@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from sc2scala.race import Race
 from sc2scala.server.api_tokens import hash_of_token, new_token
 from sc2scala.server.models import ApiToken, BotRecord, RunnerMachine, User
 from sc2scala.server.web import DatabaseSession, check_csrf, render, required_user
@@ -60,4 +61,6 @@ def _render_account(request: Request, session: Session, user: User, **context: A
     machines = session.scalars(
         select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name)
     )
-    return render(request, "account.html", user=user, bots=list(bots), machines=list(machines), **context)
+    return render(
+        request, "account.html", user=user, bots=list(bots), machines=list(machines), races=list(Race), **context
+    )

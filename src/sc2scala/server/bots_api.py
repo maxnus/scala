@@ -1,6 +1,6 @@
 """The API's bots: uploading a version, listing, reading and downloading them."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, BinaryIO
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -38,6 +38,19 @@ def upload_version(
 
     A zip the bot holds already is no new version.
     """
+    bot, version, is_new = upload_bot_version(request, session, user, name, archive.file, race=race)
+    return {"bot": bot_summary(bot), "version": version_summary(version), "new": is_new}
+
+
+def upload_bot_version(
+    request: Request, session: Session, user: User, name: str, archive: BinaryIO, *, race: str | None
+) -> tuple[BotRecord, BotVersion, bool]:
+    """Stores `archive` as the next version of the user's bot `name`, made of `race` if it is new, and returns the bot,
+    the version, and whether the version is new, rather than one the bot holds already.
+
+    Raises `HTTPException` if the name is not a bot's, the bot is someone else's, a new bot has no race, or the race is
+    none; `UploadRefusedError` if the zip is not a bot's.
+    """
     bot = bot_named(session, name)
     if bot is None:
         if not is_valid_bot_name(name) or len(name) > _MAX_BOT_NAME_LENGTH:
@@ -50,7 +63,7 @@ def upload_version(
     config = request.app.state.config
     file_store: FileStore = request.app.state.file_store
     stored, bot_type = file_store.store(
-        archive.file,
+        archive,
         kind=BOT_ARCHIVES,
         suffix=BOT_ARCHIVE_SUFFIX,
         max_bytes=config.max_bot_upload_mib * _MEBIBYTE,
@@ -71,7 +84,7 @@ def upload_version(
         )
         bot.versions.append(version)
     commit_or_conflict(session, f"Another upload of {name} came at the same moment: upload again")
-    return {"bot": bot_summary(bot), "version": version_summary(version), "new": is_new}
+    return bot, version, is_new
 
 
 @router.get("")

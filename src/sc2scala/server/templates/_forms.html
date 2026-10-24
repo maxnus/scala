@@ -1,0 +1,34 @@
+{# Forms shared by pages: each posts with the session's form token and comes back to `next_page`. #}
+
+{% macro entry_actions(entry, user, csrf_token, next_page, may_withdraw) %}
+  {% if user and entry.bot.owner_id == user.id %}
+    {% set action = "resume" if entry.paused else "pause" %}
+    <form method="post" action="/ladders/{{ entry.ladder.name }}/entries/{{ entry.bot.name }}/{{ action }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next_page" value="{{ next_page }}">
+      <button type="submit" class="link">{{ "Resume" if entry.paused else "Pause" }}</button>
+    </form>
+  {% endif %}
+  {% if may_withdraw %}
+    <form method="post" action="/ladders/{{ entry.ladder.name }}/entries/{{ entry.bot.name }}/withdraw" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next_page" value="{{ next_page }}">
+      <button type="submit" class="link" title="Takes it out of the ladder; entering it again brings back its history">Withdraw</button>
+    </form>
+  {% endif %}
+{% endmacro %}
+
+{% macro race_options(races, selected, keep=None) %}
+  {% if keep %}<option value="">{{ keep }}</option>{% endif %}
+  {% for race in races %}
+    <option value="{{ race.value }}"{% if race.value == selected %} selected{% endif %}>{{ race.name | capitalize }}</option>
+  {% endfor %}
+{% endmacro %}
+
+{% macro zip_note() %}
+  <p class="note">
+    A zip of the bot's folder, in AI Arena's layout: <code>run.py</code> for a Python bot, or <code>NAME.dll</code>,
+    <code>NAME.jar</code>, <code>NAME.js</code> or a Linux binary <code>NAME</code>, named for the bot. Zipping the folder
+    itself, or the files in it, both work.
+  </p>
+{% endmacro %}

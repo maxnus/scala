@@ -35,13 +35,16 @@ def test_anyone_sees_a_public_ladders_standings_and_matches(ladder: LadderWithBo
     assert "± " in page
 
 
-def test_a_protected_ladder_is_shown_to_its_members_alone(server: TestClient) -> None:
+def test_a_protected_ladder_is_shown_to_its_members_alone_and_offered_to_join(server: TestClient) -> None:
     ladder_with_bots(server, ladder="secret", password="pw")
     home = server.get("/").text
-    assert "join with <code>sc2scala ladder join secret</code>" in home
+    assert '<a href="/ladders/secret">join it</a> with its password' in home
     refused = server.get("/ladders/secret")
     assert refused.status_code == 403
-    assert "<h1>Not for you to see</h1>" in refused.text
+    assert "Only its members see this ladder" in refused.text and "Sign in to join" in refused.text
+    assert "<h2>Standings</h2>" not in refused.text
+    sign_in_dev(server, "carol")
+    assert 'action="/ladders/secret/join"' in server.get("/ladders/secret").text
     sign_in_dev(server, "bob")
     assert server.get("/ladders/secret").status_code == 200
 

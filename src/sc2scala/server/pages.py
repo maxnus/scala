@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from sc2scala.race import Race
 from sc2scala.result_code import ResultCode
 from sc2scala.server.bots_api import bot_named
 from sc2scala.server.ladder_ratings import (
@@ -16,7 +17,7 @@ from sc2scala.server.ladder_ratings import (
     rating_of_latest_version,
     standings,
 )
-from sc2scala.server.ladders_api import is_member, visible_ladder
+from sc2scala.server.ladders_api import is_member, ladder_named, may_enter, may_withdraw, visible_ladder
 from sc2scala.server.match_draw import LEASED, VOID
 from sc2scala.server.matches_api import (
     logs_of,
@@ -26,7 +27,7 @@ from sc2scala.server.matches_api import (
     replay_of,
     visible_match,
 )
-from sc2scala.server.models import Ladder, LadderEntry, MatchRecord, User
+from sc2scala.server.models import BotRecord, Ladder, LadderEntry, MatchRecord, User
 from sc2scala.server.web import DatabaseSession, render, signed_in_user
 
 router = APIRouter()
@@ -59,7 +60,15 @@ def ladders_page(request: Request, session: DatabaseSession, user: SignedInUser)
 
 @router.get("/ladders/{name}", response_class=HTMLResponse)
 def ladder_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
-    ladder = visible_ladder(session, name, user)
+    """The ladder's standings and latest matches, with forms to enter a bot and manage entries; for one who may not
+    see a protected ladder, a form to join it."""
+    ladder = ladder_named(session, name)
+    if ladder is None:
+        raise HTTPException(404, f"No ladder is named {name}")
+    if ladder.is_protected and not is_member(ladder, user):
+        return render(request, "ladder_join.html", user=user, ladder=ladder, status_code=403)
+    entered = {entry.bot_id for entry in ladder.entries}
+    own_bots = _bots_of(session, user)
     return render(
         request,
         "ladder.html",
@@ -69,6 +78,10 @@ def ladder_page(request: Request, session: DatabaseSession, user: SignedInUser, 
         matches=_shown_matches(_latest_matches(session, ladder, limit=_MATCHES_ON_LADDER_PAGE)),
         interval_width=INTERVAL_WIDTH,
         prior_sd=PRIOR_SD,
+        may_enter=may_enter(ladder, user),
+        enterable_bots=[bot for bot in own_bots if bot.latest_version and bot.id not in entered],
+        has_bots=bool(own_bots),
+        may_withdraw=lambda entry: may_withdraw(entry, user),
     )
 
 
@@ -120,11 +133,12 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
     bot = bot_named(session, name)
     if bot is None:
         raise HTTPException(404, f"No bot is named {name}")
-    entries = session.scalars(
-        select(LadderEntry).join(Ladder).where(LadderEntry.bot_id == bot.id).order_by(Ladder.name)
+    bot_entries = list(
+        session.scalars(select(LadderEntry).join(Ladder).where(LadderEntry.bot_id == bot.id).order_by(Ladder.name))
     )
+    entries = bot_entries
     ladders = [
-        {"ladder": entry.ladder, "standing": rating_of_latest_version(session, entry.ladder, entry)}
+        {"ladder": entry.ladder, "entry": entry, "standing": rating_of_latest_version(session, entry.ladder, entry)}
         for entry in entries
         if not entry.ladder.is_protected or is_member(entry.ladder, user)
     ]
@@ -139,7 +153,34 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
         .order_by(MatchRecord.id.desc())
         .limit(_MATCHES_ON_LADDER_PAGE)
     )
-    return render(request, "bot.html", user=user, bot=bot, ladders=ladders, matches=_shown_matches(list(matches)))
+    is_author = user is not None and bot.owner_id == user.id
+    entered_ladders = {entry.ladder_id for entry in bot_entries}
+    enterable_ladders = (
+        [
+            ladder
+            for ladder in session.scalars(select(Ladder).order_by(Ladder.name))
+            if ladder.id not in entered_ladders and may_enter(ladder, user)
+        ]
+        if is_author and bot.latest_version
+        else []
+    )
+    return render(
+        request,
+        "bot.html",
+        user=user,
+        bot=bot,
+        ladders=ladders,
+        matches=_shown_matches(list(matches)),
+        is_author=is_author,
+        enterable_ladders=enterable_ladders,
+        races=list(Race),
+    )
+
+
+def _bots_of(session: Session, user: User | None) -> list[BotRecord]:
+    if user is None:
+        return []
+    return list(session.scalars(select(BotRecord).where(BotRecord.owner_id == user.id).order_by(BotRecord.name)))
 
 
 def outcome_of(record: MatchRecord) -> str:

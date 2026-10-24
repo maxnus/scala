@@ -103,7 +103,7 @@ def change_ladder(session: DatabaseSession, user: TokenUser, name: str, changes:
 
     Whoever joined with an earlier password stays a member.
     """
-    ladder = _owned_ladder(session, name, user)
+    ladder = owned_ladder(session, name, user)
     if changes.new_password and changes.remove_password:
         raise HTTPException(422, "Set a password or remove it, not both")
     if changes.new_password:
@@ -121,7 +121,7 @@ def change_ladder(session: DatabaseSession, user: TokenUser, name: str, changes:
 def add_map(
     request: Request, session: DatabaseSession, user: TokenUser, name: str, map_file: UploadFile
 ) -> dict[str, Any]:
-    ladder = _owned_ladder(session, name, user)
+    ladder = owned_ladder(session, name, user)
     _add_map(request, session, ladder, map_file, uploader=user)
     session.commit()
     return ladder_details(ladder, user)
@@ -129,7 +129,7 @@ def add_map(
 
 @router.delete("/{name}/maps/{map_name}")
 def remove_map(session: DatabaseSession, user: TokenUser, name: str, map_name: str) -> dict[str, Any]:
-    ladder = _owned_ladder(session, name, user)
+    ladder = owned_ladder(session, name, user)
     held = next((map_file for map_file in ladder.maps if map_file.name == map_name), None)
     if held is None:
         raise HTTPException(404, f"{ladder.name} has no map {map_name}")
@@ -278,7 +278,8 @@ def _existing_ladder(session: Session, name: str) -> Ladder:
     return ladder
 
 
-def _owned_ladder(session: Session, name: str, user: User) -> Ladder:
+def owned_ladder(session: Session, name: str, user: User) -> Ladder:
+    """The ladder named `name`; 404 if there is none, and 403 if it is not the user's."""
     ladder = _existing_ladder(session, name)
     if ladder.owner_id != user.id:
         raise HTTPException(403, f"{ladder.name} is {ladder.owner.login}'s to change")

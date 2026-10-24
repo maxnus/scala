@@ -7,6 +7,9 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, MetaData, String, Tab
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+RUNNER_NAME_LENGTH = 150
+"""The length of a runner machine's name with its owner's, `owner/name`."""
+
 
 class UtcDateTime(TypeDecorator[datetime]):
     """A point in time, stored as UTC without a time zone and read back as UTC with one."""
@@ -151,6 +154,7 @@ class Ladder(Base):
     maps: Mapped[list[MapFile]] = relationship(secondary=ladder_maps, order_by=MapFile.name)
     members: Mapped[list["LadderMember"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
     entries: Mapped[list["LadderEntry"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
+    barred_runners: Mapped[list["BarredRunner"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
 
     @property
     def is_protected(self) -> bool:
@@ -215,6 +219,11 @@ class RunnerMachine(Base):
     owner: Mapped[User] = relationship()
     ladders: Mapped[list[Ladder]] = relationship(secondary=runner_machine_ladders, order_by=Ladder.name)
 
+    @property
+    def runner_name(self) -> str:
+        """The machine as matches and bars name it, `owner/name`."""
+        return f"{self.owner.login}/{self.name}"
+
 
 class MatchRecord(Base):
     """A match drawn for a runner: leased to it until `deadline`, then finished with its result, or void.
@@ -232,6 +241,8 @@ class MatchRecord(Base):
     player_1_race: Mapped[str] = mapped_column(String(1))
     player_2_race: Mapped[str] = mapped_column(String(1))
     machine_id: Mapped[int | None] = mapped_column(ForeignKey("runner_machines.id", ondelete="SET NULL"), index=True)
+    runner: Mapped[str | None] = mapped_column(String(RUNNER_NAME_LENGTH), index=True)
+    """The machine that played it, as `owner/name`, which stays once the machine is removed."""
     status: Mapped[str] = mapped_column(String(10), index=True)
     drawn_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
     deadline: Mapped[datetime] = mapped_column(UtcDateTime)
@@ -255,6 +266,20 @@ class MatchRecord(Base):
     @property
     def versions(self) -> tuple[BotVersion, BotVersion]:
         return self.player_1_version, self.player_2_version
+
+
+class BarredRunner(Base):
+    """A runner machine, as `owner/name`, that a ladder's owner barred from playing its matches; whether the bar voided
+    the results it reported there."""
+
+    __tablename__ = "barred_runners"
+
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True)
+    runner: Mapped[str] = mapped_column(String(RUNNER_NAME_LENGTH), primary_key=True)
+    barred_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    results_voided: Mapped[bool]
+
+    ladder: Mapped[Ladder] = relationship(back_populates="barred_runners")
 
 
 class Rating(Base):

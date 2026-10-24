@@ -21,6 +21,7 @@ from sc2scala.server import (
     account_routes,
     api_routes,
     bots_api,
+    ladder_runners_api,
     ladders_api,
     matches_api,
     pages,
@@ -82,6 +83,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(api_routes.router)
     app.include_router(bots_api.router)
     app.include_router(ladders_api.router)
+    app.include_router(ladder_runners_api.router)
     app.include_router(runners_api.router)
     app.include_router(runner_api.router)
     app.include_router(matches_api.router)

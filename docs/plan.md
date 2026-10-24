@@ -71,6 +71,12 @@ Whoever gives a protected ladder's password once becomes a member. Members alone
 runner, and see its pages, matches and replays. A public ladder's pages are open to everyone, and anyone signed in can
 enter a bot.
 
+Whoever sees a ladder sees the runner machines that played its matches, and its owner can bar one, by its owner and
+name. A barred machine draws none of the ladder's matches; those it is playing there are void, and so are its results
+there, unless the owner keeps them, as for a runner barred for being slow rather than dishonest. The ratings are then
+fitted without them, and an entry their failed starts paused plays again. A match names its runner when it is drawn,
+so that a machine's results can be voided after it is removed, and the bar holds the name if it is registered again.
+
 ### Matches
 
 A runner asks the server for a match when it has a free slot, and the server makes one then; there is no queue of

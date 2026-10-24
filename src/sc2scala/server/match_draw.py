@@ -14,6 +14,8 @@ LEASED = "leased"
 FINISHED = "finished"
 VOID = "void"
 MAX_FAILED_STARTS_IN_A_ROW = 5
+FAILED_STARTS = "failed to start"
+"""How an entry paused for its failed starts says so, at its start."""
 
 _RESULTS_SHOWING_BOTH_STARTED = frozenset(ResultCode) - {ResultCode.INITIALIZATION_ERROR, ResultCode.ERROR}
 
@@ -48,6 +50,7 @@ def draw_match(
         player_1_race=player_1.bot.race,
         player_2_race=player_2.bot.race,
         machine=machine,
+        runner=machine.runner_name,
         status=LEASED,
         drawn_at=now,
         deadline=now + real_time_limit + lease_margin,
@@ -58,17 +61,20 @@ def draw_match(
 
 def served_ladders(session: Session, machine: RunnerMachine) -> list[Ladder]:
     """The ladders `machine` serves: every public one if it serves them, and those it lists, a protected one while its
-    owner is a member."""
+    owner is a member; none that barred it."""
     ladders = session.scalars(
         select(Ladder).options(
             selectinload(Ladder.maps),
             selectinload(Ladder.members),
+            selectinload(Ladder.barred_runners),
             selectinload(Ladder.entries).selectinload(LadderEntry.bot).selectinload(BotRecord.versions),
         )
     ).all()
     listed = {ladder.id for ladder in machine.ladders}
     served = []
     for ladder in ladders:
+        if any(barred.runner == machine.runner_name for barred in ladder.barred_runners):
+            continue
         owner_is_member = any(member.user_id == machine.owner_id for member in ladder.members)
         if ladder.is_protected:
             if ladder.id in listed and owner_is_member:
@@ -106,7 +112,7 @@ def record_result(session: Session, match: MatchRecord, code: ResultCode, *, now
             entry.failed_starts_in_a_row += 1
             if entry.failed_starts_in_a_row >= MAX_FAILED_STARTS_IN_A_ROW and not entry.paused:
                 entry.paused = True
-                entry.paused_because = f"failed to start {entry.failed_starts_in_a_row} times in a row"
+                entry.paused_because = f"{FAILED_STARTS} {entry.failed_starts_in_a_row} times in a row"
         elif code in _RESULTS_SHOWING_BOTH_STARTED:
             entry.failed_starts_in_a_row = 0
 

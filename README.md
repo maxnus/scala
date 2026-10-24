@@ -54,6 +54,10 @@ uv run sc2scala ladder show night-league
 `--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala bot --help` and
 `sc2scala ladder --help` list the rest.
 
+`sc2scala ladder runners LADDER` lists the runner machines that played a ladder's matches. Its owner bars one with
+`sc2scala ladder bar-runner LADDER OWNER/MACHINE`, which voids its results there, unless `--keep-results`, and fits the
+ratings again; `unbar-runner` lets it play again, and what the bar voided stays void.
+
 ## Running matches
 
 A machine with Docker plays the matches the server draws for it, one at a time, once registered as a runner machine

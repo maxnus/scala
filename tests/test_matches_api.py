@@ -25,7 +25,14 @@ def test_a_runner_token_is_shown_once_and_names_its_machine(server: TestClient) 
     registered = server.post("/api/runners", headers=alice, json={"name": "desk", "serves_public": False}).json()
     assert registered["token"].startswith("scala_runner_")
     assert server.get("/api/runners", headers=alice).json() == [
-        {"name": "desk", "owner": "alice", "serves_public": False, "ladders": [], "last_seen_at": None}
+        {
+            "name": "desk",
+            "owner": "alice",
+            "serves_public": False,
+            "ladders": [],
+            "barred_from": [],
+            "last_seen_at": None,
+        }
     ]
     assert server.post("/api/runners", headers=alice, json={"name": "desk"}).status_code == 409
     assert server.post("/api/runners", headers=alice, json={"name": "my desk"}).status_code == 422
@@ -129,12 +136,12 @@ def test_a_runner_that_cannot_play_voids_the_match(ladder: LadderWithBots) -> No
     assert played["void_because"] == "its runner could not play it: Docker is missing"
 
 
-def test_removing_a_machine_voids_its_matches(ladder: LadderWithBots) -> None:
+def test_removing_a_machine_voids_its_matches_which_still_name_it(ladder: LadderWithBots) -> None:
     match = draw(ladder.server, ladder.runner)
     assert match is not None
     ladder.server.delete("/api/runners/desk", headers=ladder.alice)
     played = ladder.server.get(f"/api/matches/{match['id']}", headers=ladder.alice).json()
-    assert (played["status"], played["runner"]) == ("void", None)
+    assert (played["status"], played["runner"]) == ("void", "alice/desk")
     assert ladder.server.post("/api/runner/matches", headers=ladder.runner).status_code == 401
 
 

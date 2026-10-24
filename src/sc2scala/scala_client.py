@@ -119,6 +119,17 @@ class ScalaClient:
     def ladder_matches(self, name: str, *, limit: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/api/ladders/{name}/matches", params={"limit": limit})
 
+    def ladder_runners(self, name: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/api/ladders/{name}/runners")
+
+    def bar_runner(self, ladder: str, runner: str, *, keep_results: bool) -> dict[str, Any]:
+        """Bars `runner`, `owner/name`, from the ladder, and voids its results there unless `keep_results`."""
+        body = {"runner": runner, "keep_results": keep_results}
+        return self._request("POST", f"/api/ladders/{ladder}/barred-runners", json=body)
+
+    def unbar_runner(self, ladder: str, runner: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/api/ladders/{ladder}/barred-runners/{runner}")
+
     def next_match(self) -> dict[str, Any] | None:
         """A match for this runner machine to play, or `None` if there is none."""
         return self._request("POST", "/api/runner/matches")

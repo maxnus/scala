@@ -49,3 +49,28 @@ def test_the_stopped_bots_logs_are_cut_to_the_limit(tmp_path: Path) -> None:
             threading.Event().wait(0.01)
     assert flood.read_bytes().startswith(b"x" * 1000 + b"\n[Scala cut this log at 1000 bytes")
     assert other_bot_log.stat().st_size == 5000
+
+
+def test_a_bot_whose_logs_still_grow_is_stopped_again(tmp_path: Path) -> None:
+    folders = make_log_folders(tmp_path)
+    flood = folders[0] / "bot" / "stderr.log"
+    stops: list[int] = []
+
+    def stop_bot_but_fail_once(seat: int) -> None:
+        stops.append(seat)
+        if len(stops) == 1:
+            with flood.open("ab") as log:
+                log.write(b"x" * 500)
+
+    with LogWatchdog(
+        folders,
+        max_bytes=1000,
+        stop_bot=stop_bot_but_fail_once,
+        check_interval_seconds=0.01,
+        retry_interval_seconds=0.05,
+    ):
+        flood.write_bytes(b"x" * 2000)
+        while len(stops) < 2:
+            threading.Event().wait(0.01)
+        threading.Event().wait(0.2)
+    assert stops == [1, 1]

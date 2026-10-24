@@ -10,7 +10,7 @@ each bot in [a sandbox](docs/sandbox.md).
 ## Playing one match
 
 Scala plays its matches with AI Arena's match controller, in its Docker images, so it needs x86-64 Linux and Docker
-with Compose v2, whose `docker` command your user can run. The first match downloads the images, about 11 GB.
+with Compose 2.20 or later, whose `docker` command your user can run. The first match downloads the images, about 11 GB.
 
 ```bash
 uv sync

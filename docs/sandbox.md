@@ -16,12 +16,15 @@ who owns nothing of yours.
 | **Processes** | 1024, threads included. |
 | **Logs** | 100 MiB. A bot whose logs grow past that is stopped, and loses the match; its logs are cut to the limit. |
 
-The game's two clients share 4 cores and 6 GiB. A ladder sets all of these in its `ResourceLimits`.
+The game's two clients share 4 cores and 6 GiB, and the match controller, which relays every message of the bots',
+takes 1 core and 1 GiB. A ladder sets all of these in its `ResourceLimits`.
 
 A Windows bot does not play: AI Arena's v0.8.0 bot image holds no Wine, and `sc2scala play` refuses one.
 
 The sandbox does not guard against a bot that exploits the kernel itself, which only a stronger layer, such as gVisor,
-would. Nor does it make machines alike: a bot that budgets by the clock plays differently on a slower one.
+would. Nor does it make machines alike: a bot that budgets by the clock plays differently on a slower one. The match
+controller tells the two bots apart by the port each connects from, so a bot that guessed its opponent's could try to
+pose as it; no test tries that yet.
 
 ## A runner of its own, with rootless Docker
 

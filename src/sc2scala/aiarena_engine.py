@@ -28,15 +28,18 @@ _WORK_FOLDER_NAME = ".work"
 _MATCH_CONTROLLER_SERVICE = "proxy_controller"
 _GAME_FOLDER = "/root/StarCraftII"
 _MEBIBYTE = 1024 * 1024
+_NETWORKS = ("player_1", "player_2", "game")
+"""The match's networks: each bot's, which it shares with the match controller alone, and the game's."""
 
 
 class AiArenaEngine:
     """Plays a match with AI Arena's match controller, in its Docker images, through Docker Compose.
 
-    Needs Docker with Compose v2, and pulls a missing image before the match starts. Each match is a Compose project
-    of its own, so that several can run at once, and each bot plays sandboxed, as `docs/sandbox.md` says. Under
-    rootless Docker, which `rootless` says or Docker is asked about at the first match, the containers run as their
-    root, which is the user who started Docker; otherwise as the user of this process.
+    Needs Docker with Compose 2.20 or later, for `docker compose wait`, and pulls a missing image before the match
+    starts. Each match is a Compose project of its own, so that several can run at once, and each bot plays sandboxed,
+    as `docs/sandbox.md` says. Under rootless Docker, which `rootless` says or Docker is asked about at the first
+    match, the containers run as their root, which is the user who started Docker; otherwise as the user of this
+    process.
 
     The engine lays its files out in a work folder inside the output folder, and removes it once the match is over,
     leaving the replay and `logs`, which holds the controllers' logs and each bot's own, in `player_1-<name>` and
@@ -148,7 +151,10 @@ class AiArenaEngine:
         finally:
             if created:
                 logs = [*compose, "logs", "--no-color", "--timestamps"]
-                self._run_command(logs, timeout=_CONTAINER_STOP_SECONDS * 6, log_file=compose_log)
+                try:
+                    self._run_command(logs, timeout=_CONTAINER_STOP_SECONDS * 6, log_file=compose_log)
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Docker Compose took too long to write the containers' output to {compose_log}")
                 down = [*compose, "down", "--remove-orphans", "--timeout", str(_CONTAINER_STOP_SECONDS)]
                 self._run_command(down, timeout=None, log_file=compose_log)
 
@@ -194,9 +200,12 @@ def _lay_out_work_folder(match: Match, *, work_folder: Path, image_tag: str, con
 
 
 def _make_entry_point_executable(bot: Bot, bot_folder: Path) -> None:
-    """Lets the binary of a Linux bot run, which its controller cannot see to on a folder it may only read."""
-    if bot.bot_type in (BotType.CPP_LINUX, BotType.LINUX):
-        binary = bot_folder / bot.name
+    """Lets the binary of a Linux bot run, which its controller cannot see to on a folder it may only read.
+
+    A binary that is a symbolic link is left as it is, since its target may lie outside the work folder.
+    """
+    binary = bot_folder / bot.name
+    if bot.bot_type in (BotType.CPP_LINUX, BotType.LINUX) and not binary.is_symlink():
         binary.chmod(binary.stat().st_mode | 0o111)
 
 
@@ -281,10 +290,11 @@ def _compose_project(match: Match, *, work_folder: Path, image_tag: str, user: s
             "memswap_limit": memory,
             "cpus": resource_limits.bot_cpus,
             "pids_limit": resource_limits.bot_processes,
-            "networks": [f"player_{seat}"],
+            "networks": [_NETWORKS[seat - 1]],
         }
 
     game_memory = f"{resource_limits.game_memory_mib}m"
+    match_controller_memory = f"{resource_limits.match_controller_memory_mib}m"
     return {
         "services": {
             "sc2_controller": {
@@ -300,7 +310,7 @@ def _compose_project(match: Match, *, work_folder: Path, image_tag: str, user: s
                 "mem_limit": game_memory,
                 "memswap_limit": game_memory,
                 "cpus": resource_limits.game_cpus,
-                "networks": ["game"],
+                "networks": [_NETWORKS[2]],
             },
             "bot_controller1": bot_controller(1, match.player_1),
             "bot_controller2": bot_controller(2, match.player_2),
@@ -320,10 +330,13 @@ def _compose_project(match: Match, *, work_folder: Path, image_tag: str, user: s
                     f"{work_folder}/replays:/replays",
                     f"{work_folder}/logs:/logs",
                 ],
-                "networks": ["player_1", "player_2", "game"],
+                "mem_limit": match_controller_memory,
+                "memswap_limit": match_controller_memory,
+                "cpus": resource_limits.match_controller_cpus,
+                "networks": list(_NETWORKS),
             },
         },
-        "networks": {name: {"internal": True} for name in ("player_1", "player_2", "game")},
+        "networks": {network: {"internal": True} for network in _NETWORKS},
     }
 
 

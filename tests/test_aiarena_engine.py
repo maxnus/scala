@@ -211,6 +211,8 @@ def test_the_containers_take_the_matchs_resource_limits(tmp_path: Path, match: M
     assert bot["tmpfs"] == ["/tmp:size=1000m,mode=1777", "/bots/loser_bot/data:size=1000m,mode=1777"]
     game = services["sc2_controller"]
     assert (game["cpus"], game["mem_limit"]) == (3, "6144m")
+    match_controller = services["proxy_controller"]
+    assert (match_controller["cpus"], match_controller["mem_limit"]) == (1.0, "1024m")
 
 
 def test_a_linux_bots_binary_is_made_executable(tmp_path: Path, match: Match) -> None:
@@ -310,3 +312,31 @@ def test_a_work_folder_that_cannot_be_removed_leaves_the_result(
     monkeypatch.setattr("sc2scala.aiarena_engine.shutil.rmtree", refuse_to_remove)
     result = engine_with(FakeDocker(engine_result=_RESULT_OF_A_WIN)).play(match, output_folder=tmp_path / "out")
     assert result.code == ResultCode.PLAYER_1_WIN
+
+
+def test_a_linux_bots_binary_that_is_a_link_is_left_as_it_is(tmp_path: Path, match: Match) -> None:
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"not the bot's")
+    outside.chmod(0o644)
+    folder = tmp_path / "bots" / "linked_bot"
+    folder.mkdir()
+    (folder / "linked_bot").symlink_to(outside)
+    engine_with(FakeDocker(engine_result=_RESULT_OF_A_WIN)).play(
+        Match(player_1=Bot.from_folder(folder), player_2=match.player_2, map_file=match.map_file),
+        output_folder=tmp_path / "out",
+    )
+    assert outside.stat().st_mode & 0o777 == 0o644
+
+
+def test_a_slow_compose_logs_still_removes_the_containers(tmp_path: Path, match: Match) -> None:
+    class SlowLogsDocker(FakeDocker):
+        def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+            if "logs" in args:
+                self.commands.append(list(args))
+                raise subprocess.TimeoutExpired(list(args), timeout or 0)
+            return super().__call__(args, timeout=timeout, log_file=log_file)
+
+    docker = SlowLogsDocker(engine_result=_RESULT_OF_A_WIN)
+    result = engine_with(docker).play(match, output_folder=tmp_path / "out")
+    assert result.code == ResultCode.PLAYER_1_WIN
+    assert docker.subcommands()[-1] == "down"

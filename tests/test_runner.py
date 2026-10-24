@@ -1,15 +1,20 @@
 import json
 import random
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
 from sc2scala import EngineError, Match, MatchResult, ResultCode
 from sc2scala.cli import main
+from sc2scala.errors import ServerError
 from sc2scala.runner import Runner
 from sc2scala.scala_client import ScalaClient
+from sc2scala.server.models import MatchRecord
 from tests.conftest import api_headers_of
 from tests.match_helpers import REPLAY_BYTES, LadderWithBots, ladder_with_bots
 
@@ -129,3 +134,78 @@ def test_runner_register_and_start_once(
     assert len(engine.matches) == 1
     assert main(["runner", "list"], http=ladder.server) == 0
     assert "laptop: serves league, last seen 20" in capsys.readouterr().out
+
+
+class LateEngine(FakeEngine):
+    """Plays past the match's deadline: the server voids it while it plays."""
+
+    def __init__(self, server: TestClient) -> None:
+        super().__init__()
+        self.server = server
+
+    def play(self, match: Match, *, output_folder: Path) -> MatchResult:
+        with Session(self.server.app.state.engine) as session:  # type: ignore[attr-defined]
+            session.execute(update(MatchRecord).values(deadline=datetime(2026, 1, 1).astimezone()))
+            session.commit()
+        return super().play(match, output_folder=output_folder)
+
+
+def test_a_result_the_server_refuses_leaves_the_runner_going_and_the_folder_kept(
+    ladder: LadderWithBots, tmp_path: Path
+) -> None:
+    assert runner_of(ladder, LateEngine(ladder.server), tmp_path).play_next() is False
+    [played] = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
+    assert (played["status"], played["void_because"]) == ("void", "no result by the deadline")
+    assert (tmp_path / "work" / f"match-{played['id']}").is_dir()
+
+
+class UnreachableAtFirst:
+    """Stands in for the server's client: unreachable at the first ask, with nothing to play after."""
+
+    def __init__(self) -> None:
+        self.asks = 0
+
+    def next_match(self) -> None:
+        self.asks += 1
+        if self.asks == 1:
+            raise ServerError("http://localhost could not be reached: connection refused")
+        return None
+
+
+def test_a_runner_waits_and_asks_again_when_the_server_cannot_be_reached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class StopRunning(Exception):
+        pass
+
+    waits: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 2:
+            raise StopRunning
+
+    monkeypatch.setattr("sc2scala.runner.time.sleep", wait)
+    client = UnreachableAtFirst()
+    runner = Runner(client, FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path)  # type: ignore[arg-type]
+    with pytest.raises(StopRunning):
+        runner.run(poll_seconds=5)
+    assert (client.asks, waits) == (2, [5, 5])
+    with pytest.raises(ServerError):
+        Runner(UnreachableAtFirst(), FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path).run(  # type: ignore[arg-type]
+            poll_seconds=5, once=True
+        )
+
+
+def test_runner_set_changes_what_it_is_given_alone(
+    ladder: LadderWithBots, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    token = ladder.alice["Authorization"].removeprefix("Bearer ")
+    main(["login", "http://localhost", "--token", token], http=ladder.server)
+    main(["runner", "register", "laptop", "--ladders", "league", "--no-public"], http=ladder.server)
+    capsys.readouterr()
+    main(["runner", "set", "laptop", "--ladders", "league"], http=ladder.server)
+    assert capsys.readouterr().out == "laptop: serves league\n"
+    main(["runner", "set", "laptop", "--public"], http=ladder.server)
+    assert capsys.readouterr().out == "laptop: serves every public ladder, and league\n"

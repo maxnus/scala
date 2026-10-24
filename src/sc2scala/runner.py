@@ -9,7 +9,7 @@ from loguru import logger
 from sc2scala.bot import Bot
 from sc2scala.bot_archive import unpack_bot_archive
 from sc2scala.bot_type import BotType
-from sc2scala.errors import ScalaError
+from sc2scala.errors import ScalaError, ServerError
 from sc2scala.game_limits import GameLimits
 from sc2scala.match import Match
 from sc2scala.match_engine import MatchEngine
@@ -36,16 +36,26 @@ class Runner:
         self.work_folder = work_folder
 
     def run(self, *, poll_seconds: float, once: bool = False) -> None:
-        """Plays match after match, waiting `poll_seconds` whenever none was played; with `once`, asks once."""
+        """Plays match after match, waiting `poll_seconds` whenever none was played, the server unreachable among
+        others; with `once`, asks once, and raises `ServerError` if the server cannot be asked."""
         while True:
-            played = self.play_next()
+            try:
+                played = self.play_next()
+            except ServerError as error:
+                if once:
+                    raise
+                logger.error(f"Asking the server failed, and is tried again in {poll_seconds:.0f} s: {error}")
+                played = False
             if once:
                 return
             if not played:
                 time.sleep(poll_seconds)
 
     def play_next(self) -> bool:
-        """Asks for a match, plays it and reports it; returns whether it played one to a result."""
+        """Asks for a match, plays it and reports it; returns whether the server took a result.
+
+        Raises `ServerError` if the server cannot be asked, or cannot be told that a match could not be played.
+        """
         offered = self.client.next_match()
         if offered is None:
             logger.info("No match to play")
@@ -63,9 +73,13 @@ class Runner:
             logger.error(f"{description} could not be played: {error}")
             self.client.report_failure(offered["id"], str(error))
             return False
-        self.client.report_result(
-            offered["id"], _result_report(result), files=_result_files(match, result, match_folder)
-        )
+        try:
+            self.client.report_result(
+                offered["id"], _result_report(result), files=_result_files(match, result, match_folder)
+            )
+        except ServerError as error:
+            logger.error(f"{description}: {result.code.value}, which the server did not take: {error}")
+            return False
         logger.info(f"{description}: {result.code.value}, reported")
         shutil.rmtree(match_folder, ignore_errors=True)
         return True

@@ -141,6 +141,9 @@ class ScalaClient:
         except httpx.HTTPError as error:
             partial.unlink(missing_ok=True)
             raise ServerError(f"{self.server_url} could not be reached: {error}") from error
+        except ServerError:
+            partial.unlink(missing_ok=True)
+            raise
         if digest.hexdigest() != sha256:
             partial.unlink(missing_ok=True)
             raise ServerError(f"The {kind} file {sha256[:12]} came with another hash")

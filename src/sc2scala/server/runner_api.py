@@ -167,6 +167,7 @@ def _leased_match(session: Session, machine: RunnerMachine, match_id: int) -> Ma
         raise HTTPException(404, f"The machine plays no match {match_id}")
     session.refresh(match)
     if match.status != LEASED:
+        session.commit()
         raise HTTPException(409, f"Match {match_id} is {match.status}: {match.void_because or 'reported already'}")
     return match
 

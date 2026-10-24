@@ -68,6 +68,8 @@ class AiArenaEngine:
         """Downloads the engine's images that Docker lacks, about 11 GB at first; raises `EngineError` if it cannot."""
         log_file.parent.mkdir(parents=True, exist_ok=True)
         for image in self.images:
+            if self._run_command(["docker", "image", "inspect", image], timeout=None, log_file=log_file) == 0:
+                continue
             if self._run_command(["docker", "pull", "--quiet", image], timeout=None, log_file=log_file) != 0:
                 raise EngineError(f"Docker could not pull {image}; see {log_file}")
 

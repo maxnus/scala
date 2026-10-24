@@ -340,3 +340,14 @@ def test_a_slow_compose_logs_still_removes_the_containers(tmp_path: Path, match:
     result = engine_with(docker).play(match, output_folder=tmp_path / "out")
     assert result.code == ResultCode.PLAYER_1_WIN
     assert docker.subcommands()[-1] == "down"
+
+
+def test_only_the_images_docker_lacks_are_pulled(tmp_path: Path) -> None:
+    class DockerLackingTheGame(FakeDocker):
+        def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+            self.commands.append(list(args))
+            return 1 if args[1:3] == ["image", "inspect"] and "arenaclient-sc2" in args[3] else 0
+
+    docker = DockerLackingTheGame()
+    engine_with(docker).pull_images(log_file=tmp_path / "pull.log")
+    assert [command[3] for command in docker.commands if command[1] == "pull"] == ["aiarena/arenaclient-sc2:v0.8.0"]

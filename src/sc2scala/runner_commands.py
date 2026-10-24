@@ -28,11 +28,19 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     )
     register.add_argument("name", help="the machine's name: letters, digits and '-', 40 at most")
     register.add_argument("--server", help="the server (default: the last one signed in to)")
-    _add_ladder_arguments(register)
-    change = commands.add_parser("set", help="change the ladders a machine of yours serves")
+    register.add_argument(
+        "--ladders", nargs="*", default=[], metavar="LADDER", help="ladders to serve, protected ones among them"
+    )
+    register.add_argument("--no-public", action="store_true", help="serve the ladders named alone, no public one")
+    change = commands.add_parser(
+        "set", help="change the ladders a machine of yours serves", description="Changes what it is given alone."
+    )
     change.add_argument("name")
     change.add_argument("--server", help="the server (default: the last one signed in to)")
-    _add_ladder_arguments(change)
+    change.add_argument("--ladders", nargs="*", metavar="LADDER", help="the ladders to serve, in place of the listed")
+    public = change.add_mutually_exclusive_group()
+    public.add_argument("--public", action="store_true", default=None, help="serve every public ladder")
+    public.add_argument("--no-public", action="store_false", dest="public", help="serve no ladder but those listed")
     machines = commands.add_parser("list", help="list your runner machines")
     machines.add_argument("--server", help="the server (default: the last one signed in to)")
     remove = commands.add_parser("remove", help="remove a machine of yours, whose matches are then void")
@@ -59,7 +67,7 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
             print(f"Its token is kept in {default_runner_file()}; run `sc2scala runner start`")
         case "set":
             client = signed_in_client(args.server, http=http)
-            changed = client.change_machine(args.name, serves_public=not args.no_public, ladders=args.ladders)
+            changed = client.change_machine(args.name, serves_public=args.public, ladders=args.ladders)
             print(f"{changed['name']}: {_serving(changed)}")
         case "list":
             for machine in signed_in_client(args.server, http=http).my_machines():
@@ -70,13 +78,6 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
         case "start":
             _start(args, http=http, engine=engine)
     return 0
-
-
-def _add_ladder_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--ladders", nargs="*", default=[], metavar="LADDER", help="ladders to serve, protected ones among them"
-    )
-    parser.add_argument("--no-public", action="store_true", help="serve the ladders named alone, no public one")
 
 
 def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: MatchEngine | None) -> None:

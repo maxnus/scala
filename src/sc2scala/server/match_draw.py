@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.game_limits import GameLimits
 from sc2scala.result_code import ResultCode
-from sc2scala.server.models import Ladder, LadderEntry, MatchRecord, RunnerMachine
+from sc2scala.server.models import BotRecord, Ladder, LadderEntry, MatchRecord, RunnerMachine
 
 LEASED = "leased"
 FINISHED = "finished"
@@ -60,7 +60,11 @@ def served_ladders(session: Session, machine: RunnerMachine) -> list[Ladder]:
     """The ladders `machine` serves: every public one if it serves them, and those it lists, a protected one while its
     owner is a member."""
     ladders = session.scalars(
-        select(Ladder).options(selectinload(Ladder.maps), selectinload(Ladder.members), selectinload(Ladder.entries))
+        select(Ladder).options(
+            selectinload(Ladder.maps),
+            selectinload(Ladder.members),
+            selectinload(Ladder.entries).selectinload(LadderEntry.bot).selectinload(BotRecord.versions),
+        )
     ).all()
     listed = {ladder.id for ladder in machine.ladders}
     served = []

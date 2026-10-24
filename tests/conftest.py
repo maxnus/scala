@@ -1,5 +1,7 @@
+import io
 import os
 import re
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -75,3 +77,29 @@ def map_file() -> Path:
     if not test_map:
         pytest.skip("SC2SCALA_TEST_MAP names no map")
     return Path(test_map)
+
+
+_TOKEN_IN_PAGE = re.compile(r"<pre>(scala_[A-Za-z0-9_-]+)</pre>")
+MAP_BYTES = b"MPQ\x1b" + b"a map" * 20
+
+
+def api_headers_of(server: TestClient, login: str) -> dict[str, str]:
+    """The headers with which `login`, signed in with the dev sign-in, calls the API, by a token of theirs."""
+    sign_in_dev(server, login)
+    page = server.post("/account/tokens", data={"name": "tests", "csrf_token": csrf_of(server, "/account")}).text
+    found = _TOKEN_IN_PAGE.search(page)
+    assert found is not None, page
+    server.cookies.clear()
+    return {"Authorization": f"Bearer {found.group(1)}"}
+
+
+def zip_of(files: dict[str, bytes]) -> bytes:
+    """A zip holding `files`, each name a path in it."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+PYTHON_BOT_ZIP = zip_of({"run.py": b"print('a bot')", "bot.py": b"# the bot"})

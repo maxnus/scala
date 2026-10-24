@@ -20,3 +20,11 @@ class ServerError(ScalaError):
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class UploadRefusedError(ScalaError, ValueError):
+    """An upload is not what it should be: too large, not a zip or a map, or unsafe to unpack."""
+
+
+class UploadTooLargeError(UploadRefusedError):
+    """An upload holds more than the server takes."""

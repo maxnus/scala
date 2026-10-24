@@ -40,6 +40,20 @@ the command in with it:
 uv run sc2scala login http://127.0.0.1:8000
 ```
 
+## Bots and ladders
+
+Signed in to a server, upload a bot's folder, or its zip, as its next version, and make, join and enter ladders:
+
+```bash
+uv run sc2scala bot upload MyBot path/to/MyBot --race T
+uv run sc2scala ladder create night-league --maps PylonAIE_v4.SC2Map TorchesAIE_v4.SC2Map --limit bot_memory_mib=2048
+uv run sc2scala ladder enter night-league MyBot
+uv run sc2scala ladder show night-league
+```
+
+`--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala bot --help` and
+`sc2scala ladder --help` list the rest.
+
 ## Developing
 
 | Task | Command |

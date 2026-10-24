@@ -4,6 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -33,8 +34,9 @@ client_secret = ""
 class ServerConfig:
     """What a server needs to run: where its data is, where it listens, and how people sign in.
 
-    `dev_sign_in` lets anyone sign in under any name, so it is refused, by `ValueError`, unless `host` is local.
-    `secret_key` signs the session cookies.
+    `dev_sign_in` lets anyone sign in under any name, so it is refused, by `ValueError`, unless both `host` and
+    `public_url` are local: a server behind a reverse proxy listens locally, yet serves everyone. `secret_key` signs the
+    session cookies.
     """
 
     data_folder: Path
@@ -49,6 +51,8 @@ class ServerConfig:
     def __post_init__(self) -> None:
         if self.dev_sign_in and self.host not in _LOCAL_HOSTS:
             raise ValueError(f"dev_sign_in lets anyone in, so it needs a local host, not {self.host!r}")
+        if self.dev_sign_in and urlparse(self.public_url).hostname not in _LOCAL_HOSTS:
+            raise ValueError(f"dev_sign_in lets anyone in, so it needs a local public_url, not {self.public_url!r}")
 
     @property
     def database_url(self) -> str:

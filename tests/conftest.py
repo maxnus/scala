@@ -35,7 +35,7 @@ def server_config_in(data_folder: Path, *, dev_sign_in: bool = True) -> ServerCo
         data_folder=data_folder,
         host="127.0.0.1",
         port=8000,
-        public_url="http://testserver",
+        public_url="http://localhost",
         dev_sign_in=dev_sign_in,
         github_client_id="",
         github_client_secret="",
@@ -51,7 +51,8 @@ def fake_github() -> FakeGitHub:
 @pytest.fixture
 def server(tmp_path: Path, fake_github: FakeGitHub) -> Iterator[TestClient]:
     """A server with the dev sign-in and the fake GitHub, on a database of its own, and a browser on it."""
-    with TestClient(create_app(server_config_in(tmp_path / "server"), github_accounts=fake_github)) as client:
+    app = create_app(server_config_in(tmp_path / "server"), github_accounts=fake_github)
+    with TestClient(app, base_url="http://localhost") as client:
         yield client
 
 

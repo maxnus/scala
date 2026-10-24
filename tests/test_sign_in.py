@@ -44,7 +44,9 @@ def test_a_name_github_could_not_give_is_refused(server: TestClient) -> None:
 
 
 def test_a_server_without_the_dev_sign_in_refuses_it(tmp_path: Path) -> None:
-    with TestClient(create_app(server_config_in(tmp_path / "server", dev_sign_in=False))) as server:
+    with TestClient(
+        create_app(server_config_in(tmp_path / "server", dev_sign_in=False)), base_url="http://localhost"
+    ) as server:
         assert "Dev sign-in" not in server.get("/sign-in").text
         response = server.post("/sign-in/dev", data={"login": "alice", "csrf_token": "any"})
         assert response.status_code == 404
@@ -119,3 +121,30 @@ def test_signing_out_ends_the_session(server: TestClient) -> None:
     sign_in_dev(server, "alice")
     server.post("/sign-out", data={"csrf_token": csrf_of(server, "/account")})
     assert server.get("/account", follow_redirects=False).status_code == 303
+
+
+def test_a_login_github_gave_anew_frees_it_from_its_former_owner(server: TestClient, fake_github: FakeGitHub) -> None:
+    fake_github.accounts_by_code["former"] = GitHubUser(id=1, login="bob")
+    fake_github.accounts_by_code["new"] = GitHubUser(id=2, login="bob")
+    fake_github.accounts_by_code["former renamed"] = GitHubUser(id=1, login="rob")
+    sign_in_with_github(server, "former")
+    sign_in_with_github(server, "new")
+    assert users_of(server) == [("bob-1", 1), ("bob", 2)]
+    sign_in_with_github(server, "former renamed")
+    assert users_of(server) == [("rob", 1), ("bob", 2)]
+
+
+def test_logins_are_compared_in_any_case(server: TestClient, fake_github: FakeGitHub) -> None:
+    fake_github.accounts_by_code["code"] = GitHubUser(id=42, login="alice")
+    sign_in_with_github(server, "code")
+    server.cookies.clear()
+    response = server.post("/sign-in/dev", data={"login": "Alice", "csrf_token": csrf_of(server)})
+    assert response.status_code == 400
+    sign_in_dev(server, "carol")
+    sign_in_dev(server, "CAROL")
+    assert users_of(server) == [("alice", 42), ("carol", None)]
+
+
+def test_a_sign_in_returns_to_the_page_with_its_query(server: TestClient) -> None:
+    response = server.get("/account?tab=tokens", follow_redirects=False)
+    assert response.headers["location"] == "/sign-in?next=%2Faccount%3Ftab%3Dtokens"

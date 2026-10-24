@@ -63,3 +63,12 @@ def test_nobody_deletes_another_users_token(server: TestClient) -> None:
     sign_in_dev(server, "mallory")
     server.post(f"/account/tokens/{stored.id}/delete", data={"csrf_token": csrf_of(server, "/account")})
     assert server.get("/api/me", headers={"Authorization": f"Bearer {token}"}).json() == {"login": "alice"}
+
+
+def test_a_tokens_last_use_is_written_once_a_minute_at_most(server: TestClient) -> None:
+    sign_in_dev(server, "alice")
+    token = make_token(server)
+    server.get("/api/me", headers={"Authorization": f"Bearer {token}"})
+    first_use = stored_tokens(server)[0].last_used_at
+    server.get("/api/me", headers={"Authorization": f"Bearer {token}"})
+    assert stored_tokens(server)[0].last_used_at == first_use

@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from sc2scala.errors import SignInError
@@ -77,7 +77,7 @@ def dev_sign_in(
     login = login.strip()
     if not is_valid_login(login):
         raise SignInError(f"{login!r} is no name GitHub could give: letters, digits and '-', 39 at most")
-    user = session.scalar(select(User).where(User.login == login))
+    user = _user_named(session, login)
     if user is not None and user.github_id is not None:
         raise SignInError(f"{login} signs in with GitHub")
     if user is None:
@@ -99,15 +99,24 @@ def _github_callback_url(request: Request) -> str:
     return f"{request.app.state.config.public_url}/sign-in/github/callback"
 
 
+def _user_named(session: Session, login: str) -> User | None:
+    """The user whose login is `login`, in any case, as GitHub compares them."""
+    return session.scalar(select(User).where(func.lower(User.login) == login.lower()))
+
+
 def _user_for_github_account(session: Session, account: GitHubUser) -> User:
     """The user of `account`, made at its first sign-in, and renamed if its GitHub login changed.
 
-    Raises `SignInError` if another user here holds the login.
+    A GitHub login is given anew once its owner renames, so another GitHub user still named `account.login` here is
+    renamed `<login>-<their GitHub id>`, until they sign in again. Raises `SignInError` if a dev user holds the login.
     """
     user = session.scalar(select(User).where(User.github_id == account.id))
-    holder_of_login = session.scalar(select(User).where(User.login == account.login))
+    holder_of_login = _user_named(session, account.login)
     if holder_of_login is not None and (user is None or holder_of_login.id != user.id):
-        raise SignInError(f"Another account here is named {account.login}")
+        if holder_of_login.github_id is None:
+            raise SignInError(f"Another account here is named {account.login}")
+        holder_of_login.login = f"{holder_of_login.login}-{holder_of_login.github_id}"
+        session.flush()
     if user is None:
         user = User(login=account.login, github_id=account.id)
         session.add(user)

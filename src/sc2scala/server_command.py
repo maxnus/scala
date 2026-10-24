@@ -6,6 +6,20 @@ from loguru import logger
 
 from sc2scala.errors import ScalaError
 
+_SERVER_EXTRA_MODULES = frozenset(
+    {
+        "alembic",
+        "fastapi",
+        "itsdangerous",
+        "jinja2",
+        "multipart",
+        "python_multipart",
+        "sqlalchemy",
+        "starlette",
+        "uvicorn",
+    }
+)
+
 
 def add_server_command(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
     """Adds `server` to the commands whose `add_parser` this is."""
@@ -28,7 +42,9 @@ def run_server(args: argparse.Namespace) -> int:
 
         from sc2scala.server.app import create_app
         from sc2scala.server.server_config import ServerConfig
-    except ImportError as error:
+    except ModuleNotFoundError as error:
+        if (error.name or "").split(".")[0] not in _SERVER_EXTRA_MODULES:
+            raise
         raise ScalaError("The server needs sc2scala[server]: install sc2scala with its server extra") from error
     config = ServerConfig.from_data_folder(args.data)
     sign_in = [name for name, on in (("GitHub", config.github_sign_in), ("dev", config.dev_sign_in)) if on]

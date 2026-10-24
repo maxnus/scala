@@ -3,6 +3,7 @@
 import re
 import secrets
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
@@ -15,6 +16,8 @@ from sc2scala.server.models import ApiToken, User, utc_now
 
 _CSRF_SESSION_KEY = "csrf_token"
 _USER_SESSION_KEY = "user_id"
+_LAST_USE_PRECISION = timedelta(minutes=1)
+"""How stale a token's time of last use may grow before a request brings it up to date."""
 _LOGIN_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 
@@ -43,20 +46,26 @@ def signed_in_user(request: Request, session: DatabaseSession) -> User | None:
 def required_user(request: Request, user: Annotated[User | None, Depends(signed_in_user)]) -> User:
     """Whoever is signed in; raises `SignInRequired` if nobody is."""
     if user is None:
-        raise SignInRequired(request.url.path)
+        query = request.url.query
+        raise SignInRequired(f"{request.url.path}?{query}" if query else request.url.path)
     return user
 
 
 def token_user(request: Request, session: DatabaseSession) -> User:
-    """The user whose token the request bears as `Authorization: Bearer <token>`; 401 if it bears none that is valid."""
+    """The user whose token the request bears as `Authorization: Bearer <token>`; 401 if it bears none that is valid.
+
+    The token's time of last use is brought up to date, to the minute.
+    """
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     api_token = None
     if scheme.lower() == "bearer" and token:
         api_token = session.scalar(select(ApiToken).where(ApiToken.token_hash == hash_of_token(token.strip())))
     if api_token is None:
         raise HTTPException(status_code=401, detail="No valid token", headers={"WWW-Authenticate": "Bearer"})
-    api_token.last_used_at = utc_now()
-    session.commit()
+    now = utc_now()
+    if api_token.last_used_at is None or now - api_token.last_used_at > _LAST_USE_PRECISION:
+        api_token.last_used_at = now
+        session.commit()
     return api_token.user
 
 

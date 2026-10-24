@@ -49,3 +49,11 @@ def test_the_migrations_make_the_tables_the_models_describe(tmp_path: Path) -> N
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
     engine.dispose()
+
+
+def test_the_dev_sign_in_needs_a_local_public_url_behind_a_proxy(tmp_path: Path) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(
+        'host = "127.0.0.1"\npublic_url = "https://scala.example.org"\ndev_sign_in = true\n', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="local public_url"):
+        ServerConfig.from_data_folder(tmp_path)

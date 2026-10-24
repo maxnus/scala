@@ -4,8 +4,8 @@ StarCraft II ladders between bots, played on runners their members contribute. A
 create a ladder, password-protected if they wish, enter bots in ladders, and contribute their own machine's runners to
 play the ladders' matches, on a schedule they set.
 
-[The plan](docs/plan.md) holds the design and the order of work. So far, Scala plays one match on this machine, with
-each bot in [a sandbox](docs/sandbox.md).
+[The plan](docs/plan.md) holds the design and the order of work. So far, a server holds the bots, ladders, matches and
+ratings, and runners play its matches, each bot in [a sandbox](docs/sandbox.md); there is no public server yet.
 
 ## Playing one match
 
@@ -88,6 +88,8 @@ systemctl --user enable --now sc2scala-runner
 `sc2scala ladder standings LADDER` lists a ladder's bots by rating, and `sc2scala ladder matches LADDER` its latest
 matches; the server's pages show both, each pair's record, every match with its replay, and every bot. A runner that
 plays strangers' bots should run as a user of its own, as [the sandbox](docs/sandbox.md) says.
+
+On Windows, a runner runs in WSL2, as [the WSL2 guide](docs/wsl2.md) says; nobody has tried the guide on Windows yet.
 
 ## Developing
 

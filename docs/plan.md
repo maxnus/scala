@@ -28,8 +28,9 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
    Glicko-2 and TrueSkill do, and it does not depend on the order the games were played in. Computer chess rating
    lists rate engines this way (CCRL, with BayesElo). A new version of a bot starts a new rating.
 5. **The engine is Linux, and Windows runs it in WSL2.** The app, Docker and the engine run inside the WSL2
-   distribution, and the server's pages open in the Windows browser. Windows bots do not play for now: the engine's
-   code starts a `cppwin32` bot under Wine, but its v0.8.0 bot image holds none (found in step 2).
+   distribution, and the server's pages open in the Windows browser, as [the WSL2 guide](wsl2.md) says, untested so
+   far. Windows bots do not play for now: the engine's code starts a `cppwin32` bot under Wine, but its v0.8.0 bot
+   image holds none (found in step 2).
 6. **A repository of its own, in Python**: `maxnus/scala`, shipped as `sc2scala`, the package, the import and the
    command, as NachOS ships as `sc2nachos`. Bots talk to the engine through the ladder's command line (`--GamePort`,
    `--StartPort`, `--LadderServer`, `--OpponentId`), so a bot on any library plays.
@@ -199,7 +200,9 @@ Each step ends in something that runs, and is a pull request of its own.
    deadline since 3c.
    - 4a, done: the runners above, their file, windows, `runner stop` and `runner service`, and pruning the cache.
    - 4b, done: a ladder's runners listed, and its owner barring one, which voids its results there.
-5. **Windows.** An install guide for WSL2, tested on a Windows machine.
+5. **Windows.** Done, untested: [a guide to a runner in WSL2](wsl2.md), written from Microsoft's documentation of WSL,
+   since no Windows machine was at hand (the owner, 2026-10-24). The first runner on Windows tests it, and its report
+   corrects it.
 6. **The first public server**, on the owner's VPS.
 
 ## Open

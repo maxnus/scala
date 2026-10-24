@@ -71,6 +71,14 @@ Whoever gives a protected ladder's password once becomes a member. Members alone
 runner, and see its pages, matches and replays. A public ladder's pages are open to everyone, and anyone signed in can
 enter a bot.
 
+Whoever sees a ladder sees the runner machines that played its matches, and its owner can bar one, by its owner and
+name. A barred machine draws none of the ladder's matches; those it is playing there are void, and so are its results
+there, unless the owner keeps them, as for a runner barred for being slow rather than dishonest. The ratings are then
+fitted without them, and an entry their failed starts paused plays again. A match keeps its runner's owner and name
+when it is drawn, so that a machine's results can be voided after it is removed; a bar holds whatever the owner's login
+becomes, and the name if it is registered again. A bar holds one machine, so its owner's other machines play on until
+barred too.
+
 ### Matches
 
 A runner asks the server for a match when it has a free slot, and the server makes one then; there is no queue of
@@ -187,10 +195,10 @@ Each step ends in something that runs, and is a pull request of its own.
    - 3d, done: ratings, the prior's width chosen on the prototype's AI Arena results (100 Elo points, by
      `tools/choose_rating_prior.py`), and each ladder's pages: standings, matches with their replays, and each pair's
      record.
-4. **Many runners, windows and barring runners**, in two pull requests. The server voids matches past their deadline
-   since 3c.
+4. **Many runners, windows and barring runners**, done, in two pull requests. The server voids matches past their
+   deadline since 3c.
    - 4a, done: the runners above, their file, windows, `runner stop` and `runner service`, and pruning the cache.
-   - 4b: a ladder's owner listing the machines that played it, and barring one, which voids its results there.
+   - 4b, done: a ladder's runners listed, and its owner barring one, which voids its results there.
 5. **Windows.** An install guide for WSL2, tested on a Windows machine.
 6. **The first public server**, on the owner's VPS.
 

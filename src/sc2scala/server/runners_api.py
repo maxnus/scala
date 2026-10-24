@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from sc2scala.server.api_tokens import hash_of_token, new_runner_token
 from sc2scala.server.bots_api import commit_or_conflict
+from sc2scala.server.ladder_runners_api import barred_from
 from sc2scala.server.ladders_api import visible_ladder
 from sc2scala.server.match_draw import LEASED, VOID
 from sc2scala.server.models import Ladder, MatchRecord, RunnerMachine, User, utc_now
@@ -53,7 +54,7 @@ def register_machine(session: DatabaseSession, user: TokenUser, registration: Ma
     )
     session.add(machine)
     commit_or_conflict(session, f"Another machine named {registration.name} was registered at the same moment")
-    return {**machine_summary(machine), "token": token}
+    return {**machine_summary(session, machine), "token": token}
 
 
 @router.get("")
@@ -61,7 +62,7 @@ def my_machines(session: DatabaseSession, user: TokenUser) -> list[dict[str, Any
     machines = session.scalars(
         select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name)
     )
-    return [machine_summary(machine) for machine in machines]
+    return [machine_summary(session, machine) for machine in machines]
 
 
 @router.patch("/{name}")
@@ -72,7 +73,7 @@ def change_machine(session: DatabaseSession, user: TokenUser, name: str, changes
     if changes.ladders is not None:
         machine.ladders = _ladders_named(session, changes.ladders, user)
     session.commit()
-    return machine_summary(machine)
+    return machine_summary(session, machine)
 
 
 @router.delete("/{name}")
@@ -90,12 +91,13 @@ def remove_machine(session: DatabaseSession, user: TokenUser, name: str) -> dict
     return {"removed": name}
 
 
-def machine_summary(machine: RunnerMachine) -> dict[str, Any]:
+def machine_summary(session: Session, machine: RunnerMachine) -> dict[str, Any]:
     return {
         "name": machine.name,
         "owner": machine.owner.login,
         "serves_public": machine.serves_public,
         "ladders": [ladder.name for ladder in machine.ladders],
+        "barred_from": barred_from(session, machine),
         "last_seen_at": machine.last_seen_at.isoformat() if machine.last_seen_at else None,
     }
 

@@ -105,7 +105,8 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
             print(f"{changed['name']}: {_serving(changed)}")
         case "list":
             for machine in signed_in_client(args.server, http=http).my_machines():
-                print(f"{machine['name']}: {_serving(machine)}, last seen {machine['last_seen_at'] or 'never'}")
+                barred = f", barred from {', '.join(machine['barred_from'])}" if machine["barred_from"] else ""
+                print(f"{machine['name']}: {_serving(machine)}{barred}, last seen {machine['last_seen_at'] or 'never'}")
         case "remove":
             signed_in_client(args.server, http=http).remove_machine(args.name)
             print(f"Removed {args.name}")

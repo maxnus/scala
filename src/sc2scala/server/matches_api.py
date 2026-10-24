@@ -109,7 +109,7 @@ def match_summary(record: MatchRecord) -> dict[str, Any]:
         "drawn_at": record.drawn_at.isoformat(),
         "finished_at": record.finished_at.isoformat() if record.finished_at else None,
         "void_because": record.void_because,
-        "runner": f"{record.machine.owner.login}/{record.machine.name}" if record.machine else None,
+        "runner": record.runner_name,
         "replay": record.replay_sha256 is not None,
     }
 

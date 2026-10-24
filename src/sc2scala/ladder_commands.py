@@ -1,6 +1,7 @@
 import argparse
 import getpass
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,22 @@ def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     remove_map = commands.add_parser("remove-map", help="take a map out of your ladder")
     remove_map.add_argument("name")
     remove_map.add_argument("map_name", metavar="MAP", help="the map's name, without .SC2Map")
+    runners = commands.add_parser("runners", help="list the runner machines that played a ladder's matches")
+    runners.add_argument("name")
+    bar = commands.add_parser(
+        "bar-runner",
+        help="bar a runner machine from your ladder",
+        description="Bars a runner machine from your ladder's matches, and voids the matches it plays there and its "
+        "results there, unless --keep-results; the ratings are fitted again without them.",
+    )
+    bar.add_argument("name", help="the ladder")
+    bar.add_argument("runner", type=_runner_from_text, metavar="OWNER/MACHINE", help="as `ladder runners` lists it")
+    bar.add_argument(
+        "--keep-results", action="store_true", help="keep the results it reported, for a runner barred for its speed"
+    )
+    unbar = commands.add_parser("unbar-runner", help="let a barred runner machine play your ladder again")
+    unbar.add_argument("name", help="the ladder")
+    unbar.add_argument("runner", type=_runner_from_text, metavar="OWNER/MACHINE")
 
 
 def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -> int:
@@ -101,6 +118,19 @@ def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -
         case "matches":
             for played in client.ladder_matches(args.name, limit=args.limit):
                 print(_match_line(played))
+        case "runners":
+            for runner in client.ladder_runners(args.name):
+                print(_runner_line(runner))
+        case "bar-runner":
+            barred = client.bar_runner(args.name, args.runner, keep_results=args.keep_results)
+            voided = barred["results_voided"]
+            kept = (
+                "its results kept" if args.keep_results else f"{voided} {'result' if voided == 1 else 'results'} void"
+            )
+            print(f"Barred {barred['runner']} from {args.name}, {kept}")
+        case "unbar-runner":
+            unbarred = client.unbar_runner(args.name, args.runner)
+            print(f"{unbarred['runner']} may play {args.name} again; what its bar voided stays void")
     return 0
 
 
@@ -120,6 +150,13 @@ def _limit_from_text(text: str) -> tuple[str, str]:
     if not separator or not name or not value:
         raise argparse.ArgumentTypeError(f"A limit is NAME=VALUE, not {text!r}")
     return name.strip(), value.strip()
+
+
+def _runner_from_text(text: str) -> str:
+    owner, separator, machine = text.partition("/")
+    if not separator or not owner or not machine or "/" in machine:
+        raise argparse.ArgumentTypeError(f"A runner is OWNER/MACHINE, not {text!r}")
+    return text
 
 
 def _new_password() -> str:
@@ -164,10 +201,26 @@ def _description_of(ladder: dict[str, Any]) -> str:
 
 def _match_line(played: dict[str, Any]) -> str:
     players = " vs ".join(f"{player['bot']} ({player['race']}, v{player['version']})" for player in played["players"])
-    outcome = played["result"] or played["status"]
+    if played["status"] == "void":
+        outcome = f"void, {played['result']} reported" if played["result"] else "void"
+    else:
+        outcome = played["result"] or played["status"]
     if played["void_because"]:
         outcome += f": {played['void_because']}"
     return f"{played['id']}: {players} on {played['map']}, {outcome}, by {played['runner'] or 'a removed runner'}"
+
+
+def _runner_line(runner: dict[str, Any]) -> str:
+    counts = f"{runner['finished']} finished, {runner['void']} void, {runner['being_played']} being played"
+    last = f", last drawn {_local_time(runner['last_drawn_at'])}" if runner["last_drawn_at"] else ""
+    results = "its results void" if runner["results_voided"] else "its results kept"
+    barred = f", barred since {_local_time(runner['barred_at'])}, {results}" if runner["barred_at"] else ""
+    return f"{runner['runner']}: {counts}{last}{barred}"
+
+
+def _local_time(moment: str) -> str:
+    """A moment the server gives, in ISO 8601, as this computer's local time to the minute."""
+    return f"{datetime.fromisoformat(moment).astimezone():%Y-%m-%d %H:%M}"
 
 
 def _standing_line(place: int, standing: dict[str, Any]) -> str:

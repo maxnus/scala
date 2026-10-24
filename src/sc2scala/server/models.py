@@ -7,6 +7,8 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, MetaData, String, Tab
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+MACHINE_NAME_LENGTH = 40
+
 
 class UtcDateTime(TypeDecorator[datetime]):
     """A point in time, stored as UTC without a time zone and read back as UTC with one."""
@@ -151,6 +153,7 @@ class Ladder(Base):
     maps: Mapped[list[MapFile]] = relationship(secondary=ladder_maps, order_by=MapFile.name)
     members: Mapped[list["LadderMember"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
     entries: Mapped[list["LadderEntry"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
+    barred_runners: Mapped[list["BarredRunner"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
 
     @property
     def is_protected(self) -> bool:
@@ -206,7 +209,7 @@ class RunnerMachine(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    name: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(MACHINE_NAME_LENGTH))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     serves_public: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
@@ -214,6 +217,11 @@ class RunnerMachine(Base):
 
     owner: Mapped[User] = relationship()
     ladders: Mapped[list[Ladder]] = relationship(secondary=runner_machine_ladders, order_by=Ladder.name)
+
+    @property
+    def runner_name(self) -> str:
+        """The machine as `owner/name`."""
+        return f"{self.owner.login}/{self.name}"
 
 
 class MatchRecord(Base):
@@ -232,6 +240,9 @@ class MatchRecord(Base):
     player_1_race: Mapped[str] = mapped_column(String(1))
     player_2_race: Mapped[str] = mapped_column(String(1))
     machine_id: Mapped[int | None] = mapped_column(ForeignKey("runner_machines.id", ondelete="SET NULL"), index=True)
+    runner_owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    runner_machine_name: Mapped[str | None] = mapped_column(String(MACHINE_NAME_LENGTH))
+    """The owner and the name of the machine that played it, which stay once the machine is removed."""
     status: Mapped[str] = mapped_column(String(10), index=True)
     drawn_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
     deadline: Mapped[datetime] = mapped_column(UtcDateTime)
@@ -251,10 +262,42 @@ class MatchRecord(Base):
     player_1_version: Mapped[BotVersion] = relationship(foreign_keys=[player_1_version_id])
     player_2_version: Mapped[BotVersion] = relationship(foreign_keys=[player_2_version_id])
     machine: Mapped[RunnerMachine | None] = relationship()
+    runner_owner: Mapped[User | None] = relationship()
 
     @property
     def versions(self) -> tuple[BotVersion, BotVersion]:
         return self.player_1_version, self.player_2_version
+
+    @property
+    def runner_name(self) -> str | None:
+        """The machine that played it, as `owner/name` by its owner's login now, or `None` if it is not known."""
+        if self.runner_owner is None:
+            return None
+        return f"{self.runner_owner.login}/{self.runner_machine_name}"
+
+
+class BarredRunner(Base):
+    """A runner machine, by its owner and its name, that a ladder's owner barred from playing its matches, whatever
+    the owner's login becomes; whether the bar voided the results it reported there."""
+
+    __tablename__ = "barred_runners"
+
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    machine_name: Mapped[str] = mapped_column(String(MACHINE_NAME_LENGTH), primary_key=True)
+    barred_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    results_voided: Mapped[bool]
+
+    ladder: Mapped[Ladder] = relationship(back_populates="barred_runners")
+    owner: Mapped[User] = relationship()
+
+    @property
+    def runner_name(self) -> str:
+        """The barred machine as `owner/name`, by its owner's login now."""
+        return f"{self.owner.login}/{self.machine_name}"
+
+    def bars(self, machine: RunnerMachine) -> bool:
+        return self.owner_id == machine.owner_id and self.machine_name == machine.name
 
 
 class Rating(Base):

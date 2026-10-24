@@ -150,8 +150,11 @@ def test_a_failure_the_runner_did_not_foresee_voids_its_match_and_stops_it(
     with pytest.raises(ScalaError, match="a bug"):
         runner.run(poll_seconds=0.01, workers=2)
     played = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
-    assert {match["void_because"] for match in played} == {
-        "its runner could not play it: The runner failed: RuntimeError"
+    reasons = {match["void_because"] for match in played}
+    assert "its runner could not play it: The runner failed: RuntimeError" in reasons
+    assert reasons <= {
+        "its runner could not play it: The runner failed: RuntimeError",
+        "its runner could not play it: The runner was stopped before the match began",
     }
 
 

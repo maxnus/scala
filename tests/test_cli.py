@@ -95,7 +95,7 @@ def test_runs_started_in_the_same_second_write_to_folders_of_their_own(
             return datetime(2026, 10, 24, 12, 0, 0)
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("sc2scala.cli.datetime", ClockStoppedAtNoon)
+    monkeypatch.setattr("sc2scala.play_command.datetime", ClockStoppedAtNoon)
     assert main(play_arguments, engine=RecordingEngine()) == 0
     assert main(play_arguments, engine=RecordingEngine()) == 0
     assert sorted(folder.name for folder in (tmp_path / "matches").iterdir()) == [

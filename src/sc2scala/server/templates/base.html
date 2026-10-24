@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Scala{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <header>
+    <a class="home" href="/">Scala</a>
+    <nav>
+      {% if user %}
+        <a href="/account">{{ user.login }}</a>
+        <form method="post" action="/sign-out">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link">Sign out</button>
+        </form>
+      {% else %}
+        <a href="/sign-in">Sign in</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>

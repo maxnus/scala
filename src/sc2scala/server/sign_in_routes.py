@@ -77,7 +77,7 @@ def dev_sign_in(
     login = login.strip()
     if not is_valid_login(login):
         raise SignInError(f"{login!r} is no name GitHub could give: letters, digits and '-', 39 at most")
-    user = _user_named(session, login)
+    user = user_named(session, login)
     if user is not None and user.github_id is not None:
         raise SignInError(f"{login} signs in with GitHub")
     if user is None:
@@ -99,7 +99,7 @@ def _github_callback_url(request: Request) -> str:
     return f"{request.app.state.config.public_url}/sign-in/github/callback"
 
 
-def _user_named(session: Session, login: str) -> User | None:
+def user_named(session: Session, login: str) -> User | None:
     """The user whose login is `login`, in any case, as GitHub compares them."""
     return session.scalar(select(User).where(func.lower(User.login) == login.lower()))
 
@@ -111,7 +111,7 @@ def _user_for_github_account(session: Session, account: GitHubUser) -> User:
     renamed `<login>-<their GitHub id>`, until they sign in again. Raises `SignInError` if a dev user holds the login.
     """
     user = session.scalar(select(User).where(User.github_id == account.id))
-    holder_of_login = _user_named(session, account.login)
+    holder_of_login = user_named(session, account.login)
     if holder_of_login is not None and (user is None or holder_of_login.id != user.id):
         if holder_of_login.github_id is None:
             raise SignInError(f"Another account here is named {account.login}")

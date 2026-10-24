@@ -213,7 +213,8 @@ def _match_line(played: dict[str, Any]) -> str:
 def _runner_line(runner: dict[str, Any]) -> str:
     counts = f"{runner['finished']} finished, {runner['void']} void, {runner['being_played']} being played"
     last = f", last drawn {_local_time(runner['last_drawn_at'])}" if runner["last_drawn_at"] else ""
-    barred = f", barred since {_local_time(runner['barred_at'])}" if runner["barred_at"] else ""
+    results = "its results void" if runner["results_voided"] else "its results kept"
+    barred = f", barred since {_local_time(runner['barred_at'])}, {results}" if runner["barred_at"] else ""
     return f"{runner['runner']}: {counts}{last}{barred}"
 
 

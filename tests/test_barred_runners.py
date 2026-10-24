@@ -8,10 +8,12 @@ import httpx
 import pytest
 from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import text, update
+from sqlalchemy.orm import Session
 
 from sc2scala.cli import main
 from sc2scala.server.database import alembic_config, create_database_engine
+from sc2scala.server.models import User
 from tests.conftest import api_headers_of
 from tests.match_helpers import LadderWithBots, draw, ladder_with_bots, machine_headers, report
 from tests.test_ladders_api import create_ladder
@@ -107,7 +109,21 @@ def test_a_runner_barred_for_its_speed_keeps_its_results(ladder: LadderWithBots)
     assert statuses(ladder)[finished["id"]] == ("finished", None)
     assert statuses(ladder)[being_played["id"]][0] == "void"
     [listed] = ladder.server.get("/api/ladders/league/runners", headers=ladder.alice).json()
-    assert listed["barred_at"] is not None
+    assert (listed["barred_at"] is not None, listed["results_voided"]) == (True, False)
+
+
+def test_a_bar_holds_once_its_runners_owner_is_renamed(ladder: LadderWithBots) -> None:
+    tower = machine_headers(ladder.server, ladder.bob, "tower")
+    played(ladder, tower)
+    assert bar(ladder, "Bob/tower").json()["runner"] == "bob/tower"
+    with Session(ladder.server.app.state.engine) as session:  # type: ignore[attr-defined]
+        session.execute(update(User).where(User.login == "bob").values(login="robert"))
+        session.commit()
+    assert draw(ladder.server, tower) is None
+    [listed] = ladder.server.get("/api/ladders/league/runners", headers=ladder.alice).json()
+    assert (listed["runner"], listed["void"], listed["results_voided"]) == ("robert/tower", 1, True)
+    unbarred = ladder.server.delete("/api/ladders/league/barred-runners/ROBERT/tower", headers=ladder.alice)
+    assert unbarred.json() == {"runner": "robert/tower", "barred": False}
 
 
 def test_only_the_ladders_owner_bars_and_unbars_a_runner(ladder: LadderWithBots) -> None:
@@ -167,9 +183,8 @@ def test_ladder_runners_bar_runner_and_unbar_runner(
     )
     assert main(["ladder", "runners", "league"], http=ladder.server) == 0
     line = capsys.readouterr().out
-    assert (
-        line.startswith("alice/desk: 0 finished, 1 void, 0 being played, last drawn 20") and ", barred since 20" in line
-    )
+    assert line.startswith("alice/desk: 0 finished, 1 void, 0 being played, last drawn 20")
+    assert ", barred since 20" in line and line.endswith(", its results void\n")
     assert main(["runner", "list"], http=ladder.server) == 0
     assert "desk: serves every public ladder, barred from league, last seen" in capsys.readouterr().out
     assert main(["ladder", "unbar-runner", "league", "alice/desk"], http=ladder.server) == 0
@@ -204,10 +219,8 @@ def test_the_migration_names_the_runner_of_every_match_played_before_it(tmp_path
             connection.execute(text(statement))
     command.upgrade(config, "head")
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT id, runner FROM matches ORDER BY id")).all() == [
-            (1, "alice/desk"),
-            (2, None),
-        ]
+        named = connection.execute(text("SELECT id, runner_owner_id, runner_machine_name FROM matches ORDER BY id"))
+        assert named.all() == [(1, 1, "desk"), (2, None, None)]
     engine.dispose()
 
 

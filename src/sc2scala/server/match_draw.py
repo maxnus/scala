@@ -50,7 +50,8 @@ def draw_match(
         player_1_race=player_1.bot.race,
         player_2_race=player_2.bot.race,
         machine=machine,
-        runner=machine.runner_name,
+        runner_owner_id=machine.owner_id,
+        runner_machine_name=machine.name,
         status=LEASED,
         drawn_at=now,
         deadline=now + real_time_limit + lease_margin,
@@ -73,7 +74,7 @@ def served_ladders(session: Session, machine: RunnerMachine) -> list[Ladder]:
     listed = {ladder.id for ladder in machine.ladders}
     served = []
     for ladder in ladders:
-        if any(barred.runner == machine.runner_name for barred in ladder.barred_runners):
+        if any(barred.bars(machine) for barred in ladder.barred_runners):
             continue
         owner_is_member = any(member.user_id == machine.owner_id for member in ladder.members)
         if ladder.is_protected:

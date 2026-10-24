@@ -74,8 +74,10 @@ enter a bot.
 Whoever sees a ladder sees the runner machines that played its matches, and its owner can bar one, by its owner and
 name. A barred machine draws none of the ladder's matches; those it is playing there are void, and so are its results
 there, unless the owner keeps them, as for a runner barred for being slow rather than dishonest. The ratings are then
-fitted without them, and an entry their failed starts paused plays again. A match names its runner when it is drawn,
-so that a machine's results can be voided after it is removed, and the bar holds the name if it is registered again.
+fitted without them, and an entry their failed starts paused plays again. A match keeps its runner's owner and name
+when it is drawn, so that a machine's results can be voided after it is removed; a bar holds whatever the owner's login
+becomes, and the name if it is registered again. A bar holds one machine, so its owner's other machines play on until
+barred too.
 
 ### Matches
 

@@ -27,6 +27,12 @@ dev_sign_in = true
 [github]
 client_id = ""
 client_secret = ""
+
+# The largest a bot's zip may be, and unpack to, and the largest a map may be, in MiB.
+[uploads]
+max_bot_mib = 500
+max_bot_unpacked_mib = 2048
+max_map_mib = 50
 """
 
 
@@ -36,7 +42,8 @@ class ServerConfig:
 
     `dev_sign_in` lets anyone sign in under any name, so it is refused, by `ValueError`, unless both `host` and
     `public_url` are local: a server behind a reverse proxy listens locally, yet serves everyone. `secret_key` signs the
-    session cookies.
+    session cookies. A bot's zip may hold `max_bot_upload_mib`, and unpack to `max_bot_unpacked_mib`; a map may hold
+    `max_map_upload_mib`.
     """
 
     data_folder: Path
@@ -47,6 +54,9 @@ class ServerConfig:
     github_client_id: str
     github_client_secret: str
     secret_key: str
+    max_bot_upload_mib: int = 500
+    max_bot_unpacked_mib: int = 2048
+    max_map_upload_mib: int = 50
 
     def __post_init__(self) -> None:
         if self.dev_sign_in and self.host not in _LOCAL_HOSTS:
@@ -75,6 +85,7 @@ class ServerConfig:
             logger.info(f"Wrote the default config to {config_file}")
         settings: dict[str, Any] = tomllib.loads(config_file.read_text(encoding="utf-8"))
         github: dict[str, Any] = settings.get("github", {})
+        uploads: dict[str, Any] = settings.get("uploads", {})
         return cls(
             data_folder=data_folder,
             host=settings.get("host", "127.0.0.1"),
@@ -84,6 +95,9 @@ class ServerConfig:
             github_client_id=github.get("client_id", ""),
             github_client_secret=github.get("client_secret", ""),
             secret_key=_secret_key_in(data_folder),
+            max_bot_upload_mib=int(uploads.get("max_bot_mib", 500)),
+            max_bot_unpacked_mib=int(uploads.get("max_bot_unpacked_mib", 2048)),
+            max_map_upload_mib=int(uploads.get("max_map_mib", 50)),
         )
 
 

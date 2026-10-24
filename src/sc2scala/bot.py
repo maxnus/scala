@@ -22,7 +22,7 @@ class Bot:
     folder: Path
 
     def __post_init__(self) -> None:
-        if not _BOT_NAME_PATTERN.fullmatch(self.name):
+        if not is_valid_bot_name(self.name):
             raise ValueError(
                 f"A bot's name is made of letters, digits, '_', '-' and '.', and begins with a letter, a digit or '_', "
                 f"not {self.name!r}"
@@ -32,3 +32,8 @@ class Bot:
     def from_folder(cls, folder: Path, *, race: Race = Race.RANDOM) -> "Bot":
         """The bot in `folder`, named for the folder, of the type its entry point shows (`BotType.from_folder`)."""
         return cls(name=folder.name, race=race, bot_type=BotType.from_folder(folder), folder=folder)
+
+
+def is_valid_bot_name(name: str) -> bool:
+    """Whether `name` is made of letters, digits, `_`, `-` and `.`, and begins with a letter, a digit or `_`."""
+    return _BOT_NAME_PATTERN.fullmatch(name) is not None

@@ -4,15 +4,16 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from sc2scala.__about__ import __version__
-from sc2scala.errors import SignInError
-from sc2scala.server import account_routes, api_routes, sign_in_routes
+from sc2scala.errors import SignInError, UploadRefusedError, UploadTooLargeError
+from sc2scala.server import account_routes, api_routes, bots_api, ladders_api, sign_in_routes
 from sc2scala.server.database import create_database_engine, upgrade_database
+from sc2scala.server.file_store import FileStore
 from sc2scala.server.github_accounts import GitHubAccounts
 from sc2scala.server.github_oauth_app import GitHubOAuthApp
 from sc2scala.server.server_config import ServerConfig
@@ -21,6 +22,7 @@ from sc2scala.server.web import DatabaseSession, SignInRequired, render, signed_
 _PACKAGE_FOLDER = Path(__file__).parent
 _SESSION_COOKIE = "scala_session"
 _SESSION_DAYS = 30
+_FILES_FOLDER_NAME = "files"
 
 
 def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None = None) -> FastAPI:
@@ -40,6 +42,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.state.config = config
     app.state.engine = engine
     app.state.templates = Jinja2Templates(directory=_PACKAGE_FOLDER / "templates")
+    app.state.file_store = FileStore(config.data_folder / _FILES_FOLDER_NAME)
     if github_accounts is None and config.github_sign_in:
         github_accounts = GitHubOAuthApp(client_id=config.github_client_id, client_secret=config.github_client_secret)
     app.state.github_accounts = github_accounts
@@ -55,6 +58,8 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(sign_in_routes.router)
     app.include_router(account_routes.router)
     app.include_router(api_routes.router)
+    app.include_router(bots_api.router)
+    app.include_router(ladders_api.router)
 
     @app.get("/", response_class=HTMLResponse)
     def home_page(request: Request, session: DatabaseSession) -> HTMLResponse:
@@ -69,5 +74,9 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
         return render(
             request, "message.html", user=None, title="Signing in failed", message=str(error), status_code=400
         )
+
+    @app.exception_handler(UploadRefusedError)
+    def refuse_upload(request: Request, error: UploadRefusedError) -> JSONResponse:
+        return JSONResponse({"detail": str(error)}, status_code=413 if isinstance(error, UploadTooLargeError) else 422)
 
     return app

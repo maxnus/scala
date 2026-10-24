@@ -169,8 +169,8 @@ Each step ends in something that runs, and is a pull request of its own.
 3. **The server and one runner**, in four pull requests:
    - 3a, done: the server's config and database, sign-in with GitHub and the dev sign-in, tokens, and `sc2scala server`,
      `login`, `whoami` and `logout`.
-   - 3b: bots and versions, ladders, maps and membership, and their commands. A bot's entry pauses after 5 failed
-     starts in a row.
+   - 3b, done: bots and versions, ladders, maps and membership, and their commands. A bot's entry pauses after 5
+     failed starts in a row, which 3c counts.
    - 3c: the matches as above, results, and `sc2scala runner`, which plays one match at a time, at any hour.
    - 3d: ratings, the prior's width chosen on the prototype's AI Arena results, and each ladder's pages: standings,
      matches with their replays, and each pair's record.

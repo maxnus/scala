@@ -35,12 +35,16 @@ def test_an_entry_point_is_named_for_the_folder(tmp_path: Path) -> None:
     folder = tmp_path / "MyBot"
     folder.mkdir()
     (folder / "OtherBot.jar").write_bytes(b"")
-    with pytest.raises(ValueError, match="no entry point"):
+    with pytest.raises(ValueError, match="No entry point"):
         BotType.from_folder(folder)
 
 
 def test_a_folder_named_like_the_bot_is_no_entry_point(tmp_path: Path) -> None:
     folder = tmp_path / "MyBot"
     (folder / "MyBot").mkdir(parents=True)
-    with pytest.raises(ValueError, match="no entry point"):
+    with pytest.raises(ValueError, match="No entry point"):
         BotType.from_folder(folder)
+
+
+def test_a_bot_type_is_read_from_the_names_of_its_files() -> None:
+    assert BotType.from_file_names({"MyBot.jar", "data/model.bin"}, bot_name="MyBot") == BotType.JAVA

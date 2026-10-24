@@ -95,22 +95,24 @@ def test_runner_stop_signals_the_runner_to_stop_or_to_stop_now(
 
 
 class SignalledEngine(FakeEngine):
-    """Plays a match while the runner gets SIGTERM `signals` times, and is stopped if a signal stops the runner now."""
+    """Plays a match while the runner gets `signals`, each after a pause of its own, and is stopped if they stop the
+    runner now."""
 
-    def __init__(self, runners: list[Runner], *, signals: int) -> None:
+    def __init__(self, runners: list[Runner], *, signals: list[tuple[signal.Signals, float]]) -> None:
         super().__init__()
         self.runners = runners
         self.signals = signals
 
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         [runner] = self.runners
-        os.kill(os.getpid(), signal.SIGTERM)
-        assert _within_seconds(5, lambda: runner.stopping)
-        if self.signals == 1:
-            return super().play(match, output_folder=output_folder)
-        os.kill(os.getpid(), signal.SIGTERM)
-        assert self.stopped.wait(timeout=5)
-        raise MatchStoppedError("The match was stopped while it was played")
+        for number, (signal_number, pause_seconds) in enumerate(self.signals):
+            time.sleep(pause_seconds)
+            os.kill(os.getpid(), signal_number)
+            if number == 0:
+                assert _within_seconds(5, lambda: runner.stopping)
+        if self.stopped.wait(timeout=0.5):
+            raise MatchStoppedError("The match was stopped while it was played")
+        return super().play(match, output_folder=output_folder)
 
 
 def _within_seconds(seconds: float, condition: Callable[[], bool]) -> bool:
@@ -122,9 +124,28 @@ def _within_seconds(seconds: float, condition: Callable[[], bool]) -> bool:
     return True
 
 
-@pytest.mark.parametrize(("signals", "outcome"), [(1, "finished"), (2, "void")])
-def test_a_sigterm_lets_the_match_end_and_a_second_stops_it(
-    registered: LadderWithBots, monkeypatch: pytest.MonkeyPatch, signals: int, outcome: str
+@pytest.mark.parametrize(
+    ("signals", "outcome"),
+    [
+        ([(signal.SIGTERM, 0)], "finished"),
+        ([(signal.SIGTERM, 0), (signal.SIGTERM, 0.4)], "finished"),
+        ([(signal.SIGINT, 0), (signal.SIGINT, 0.05)], "finished"),
+        ([(signal.SIGINT, 0), (signal.SIGINT, 0.4)], "void"),
+        ([(signal.SIGQUIT, 0)], "void"),
+    ],
+    ids=[
+        "a stop lets the match end",
+        "a second stop too",
+        "a Ctrl-C forwarded by uv run is one",
+        "a second Ctrl-C stops the match",
+        "SIGQUIT stops the match",
+    ],
+)
+def test_signals_stop_the_runner_once_its_match_ends_or_now(
+    registered: LadderWithBots,
+    monkeypatch: pytest.MonkeyPatch,
+    signals: list[tuple[signal.Signals, float]],
+    outcome: str,
 ) -> None:
     runners: list[Runner] = []
 
@@ -134,20 +155,41 @@ def test_a_sigterm_lets_the_match_end_and_a_second_stops_it(
             runners.append(self)
 
     monkeypatch.setattr("sc2scala.runner_commands.Runner", RecordedRunner)
-    previous = signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr("sc2scala.runner_commands._SECOND_SIGNAL_SECONDS", 0.3)
+    handled = (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT)
+    previous = [signal.getsignal(number) for number in handled]
     engine = SignalledEngine(runners, signals=signals)
     assert main(["runner", "start", "--poll-seconds", "0.01"], http=registered.server, engine=engine) == 0
-    assert signal.getsignal(signal.SIGTERM) == previous
+    assert [signal.getsignal(number) for number in handled] == previous
     [played] = registered.server.get("/api/ladders/league/matches", headers=registered.alice).json()
     assert played["status"] == outcome
 
 
-def test_runner_service_writes_a_user_service_that_starts_the_runner(
-    folders: Path, capsys: pytest.CaptureFixture[str]
+def test_runner_register_refuses_settings_that_do_not_fit_before_registering(
+    ladder: LadderWithBots, folders: Path
 ) -> None:
+    config_file = folders / "xdg_config_home" / "sc2scala" / "runner.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("runners = 0\n", encoding="utf-8")
+    main(
+        ["login", "http://localhost", "--token", ladder.alice["Authorization"].removeprefix("Bearer ")],
+        http=ladder.server,
+    )
+    assert main(["runner", "register", "laptop"], http=ladder.server) == 1
+    machines = ladder.server.get("/api/runners", headers=ladder.alice).json()
+    assert [machine["name"] for machine in machines] == ["desk"]
+
+
+def test_runner_service_writes_a_user_service_that_starts_the_runner(
+    folders: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(folders / "cache$1"))
+    monkeypatch.setenv("PATH", "/opt/docker/bin:/usr/bin")
     assert main(["runner", "service"]) == 0
     unit = (folders / "xdg_config_home" / "systemd" / "user" / "sc2scala-runner.service").read_text(encoding="utf-8")
     assert "\nExecStart=" in unit and " -m sc2scala runner start\n" in unit
     assert f"\nEnvironment=XDG_DATA_HOME={folders / 'xdg_data_home'}\n" in unit
+    assert f"\nEnvironment=XDG_CACHE_HOME={folders / 'cache$1'}\n" in unit
+    assert "\nEnvironment=PATH=/opt/docker/bin:/usr/bin\n" in unit
     assert "\nKillMode=mixed\n" in unit and "\nWantedBy=default.target\n" in unit
     assert "systemctl --user enable --now sc2scala-runner" in capsys.readouterr().out

@@ -354,6 +354,20 @@ def test_the_containers_a_killed_match_left_are_removed_by_the_project_it_named(
     assert len(docker.commands) == 1
 
 
+def test_containers_docker_compose_cannot_remove_raise_and_stay_named(tmp_path: Path) -> None:
+    project_file = tmp_path / "out" / ".work" / "compose-project"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text("sc2scala-0123456789ab\n", encoding="utf-8")
+
+    def failing_docker(args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+        return 1
+
+    engine = AiArenaEngine(run_command=failing_docker, rootless=False)
+    with pytest.raises(EngineError, match="could not remove the containers of sc2scala-0123456789ab"):
+        engine.remove_leftovers(tmp_path / "out")
+    assert project_file.exists()
+
+
 def test_containers_that_were_not_created_are_cleaned_up(tmp_path: Path, match: Match) -> None:
     docker = FakeDocker(create_exit_code=1)
     with pytest.raises(EngineError, match="could not create"):
@@ -366,6 +380,16 @@ def test_a_match_with_no_result_raises_but_keeps_its_logs(tmp_path: Path, match:
     with pytest.raises(EngineError, match="no result"):
         engine_with(FakeDocker(engine_result=None)).play(match, output_folder=output_folder)
     assert (output_folder / "logs" / "player_1-basic_bot" / "stderr.log").is_file()
+
+
+def test_a_match_that_raises_keeps_its_work_folder_but_not_its_copies_of_the_bots(tmp_path: Path, match: Match) -> None:
+    output_folder = tmp_path / "out"
+    with pytest.raises(EngineError, match="no result"):
+        engine_with(FakeDocker(engine_result=None)).play(match, output_folder=output_folder)
+    work_folder = output_folder / ".work"
+    assert (work_folder / "docker-compose.json").is_file()
+    assert not (work_folder / "bots").exists()
+    assert not (work_folder / "maps").exists()
 
 
 def test_a_result_of_unknown_type_raises(tmp_path: Path, match: Match) -> None:

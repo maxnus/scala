@@ -72,8 +72,8 @@ downloads the engine's images first if Docker lacks them, about 11 GB, and plays
 `sc2scala runner stop`, or Ctrl-C, stops it once the matches being played end; `runner stop --now`, or a second Ctrl-C,
 stops them too, which voids them.
 
-`runner service` writes a systemd user service that runs `runner start`, restarts it if it fails, and stops it as
-`runner stop` does:
+`runner service` writes a systemd user service that runs `runner start` with this shell's `PATH` and folders, restarts
+it if it fails, and stops it as `runner stop` does:
 
 ```bash
 uv run sc2scala runner service

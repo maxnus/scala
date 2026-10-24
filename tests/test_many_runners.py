@@ -173,14 +173,36 @@ def test_the_cache_keeps_to_its_limit_dropping_the_least_recently_used_first(
     assert all(file.exists() for file in used)
 
 
-def test_the_latest_kept_match_folders_stay_and_the_others_go(ladder: LadderWithBots, tmp_path: Path) -> None:
+def test_the_latest_kept_match_folders_stay_without_their_bots_and_map(ladder: LadderWithBots, tmp_path: Path) -> None:
     runner = runner_of(ladder, FakeEngine(error=EngineError("Docker is not installed")), tmp_path)
     runner.kept_match_folders = 2
     for _ in range(4):
         runner.play_next()
     played = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
     latest = sorted(match["id"] for match in played)[-2:]
-    assert sorted(folder.name for folder in (tmp_path / "work").iterdir()) == [f"match-{id}" for id in latest]
+    kept = sorted((tmp_path / "work").iterdir())
+    assert [folder.name for folder in kept] == [f"match-{id}" for id in latest]
+    assert [list(folder.iterdir()) for folder in kept] == [[], []]
+
+
+class LeftoversStayingEngine(FakeEngine):
+    """Cannot remove what a match left, as when Docker is down."""
+
+    def remove_leftovers(self, output_folder: Path) -> None:
+        raise EngineError("Docker Compose could not remove the containers of sc2scala-0123456789ab")
+
+
+def test_a_runner_that_cannot_remove_leftovers_prunes_nothing_and_plays_nothing(
+    ladder: LadderWithBots, tmp_path: Path
+) -> None:
+    engine = LeftoversStayingEngine()
+    runner = runner_of(ladder, engine, tmp_path)
+    runner.kept_match_folders = 0
+    (tmp_path / "work" / "match-5" / "output").mkdir(parents=True)
+    with pytest.raises(EngineError, match="could not remove"):
+        runner.run(poll_seconds=0.01)
+    assert (tmp_path / "work" / "match-5").is_dir()
+    assert engine.matches == []
 
 
 def test_a_runner_starting_removes_what_a_killed_runner_left(ladder: LadderWithBots, tmp_path: Path) -> None:

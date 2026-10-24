@@ -3,6 +3,7 @@
 Read from `runner.toml` beside the CLI's credentials, which `sc2scala runner register` writes with its defaults.
 """
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass
@@ -115,7 +116,12 @@ class RunnerConfig:
         if not isinstance(runners, int) or isinstance(runners, bool) or runners < 1:
             raise RunnerConfigError(f"runners is a whole number of 1 or more, not {runners!r}")
         cache_gib = content.get("cache_gib", DEFAULT_CACHE_GIB)
-        if not isinstance(cache_gib, int | float) or isinstance(cache_gib, bool) or cache_gib <= 0:
+        if (
+            not isinstance(cache_gib, int | float)
+            or isinstance(cache_gib, bool)
+            or not math.isfinite(cache_gib)
+            or cache_gib <= 0
+        ):
             raise RunnerConfigError(f"cache_gib is a positive number, not {cache_gib!r}")
         windows = content.get("window", [])
         if not isinstance(windows, list):
@@ -169,8 +175,10 @@ cache_gib = {DEFAULT_CACHE_GIB}
 
 
 def machine_cores_and_memory() -> tuple[int, int]:
-    """This machine's cores and bytes of memory, as its processes see them: in WSL2, its virtual machine's."""
-    return os.cpu_count() or 1, os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    """The cores this process may run on and the machine's bytes of memory, as its processes see them: in WSL2, its
+    virtual machine's."""
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+    return cores, os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
 
 
 def _window_from(content: Any) -> PlayingWindow:

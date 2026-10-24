@@ -31,6 +31,8 @@ _CACHED_SUFFIXES = {"bots": ".zip", "maps": ".SC2Map"}
 _LONGEST_WAIT_SECONDS = 300.0
 """How long a runner outside its windows waits before it reads the clock again, in case the clock jumped."""
 _JOIN_SECONDS = 0.2
+_START_AND_REPORT_SECONDS = 300
+"""The time a match is allowed beyond its real-time limit to start and report, to end by its deadline."""
 DEFAULT_KEPT_MATCH_FOLDERS = 10
 
 
@@ -40,7 +42,7 @@ class Runner:
     Bots and maps are downloaded once into `cache_folder`, by their hashes, and shared by the matches played at once.
     After each match, while the cache holds more than `cache_bytes`, the files least recently used go, but for those
     a match is using. Each match is played in a folder of its own in `work_folder`, removed once its result is
-    reported, and kept if it is not, the `kept_match_folders` latest of them.
+    reported, and kept if it is not, without its bots and map, the `kept_match_folders` latest of them.
     """
 
     def __init__(
@@ -162,15 +164,18 @@ class Runner:
             if self._stopping.is_set():
                 raise ScalaError("The runner was stopped before the match began")
             deadline = datetime.fromisoformat(offered["deadline"])
-            if datetime.now(UTC) + timedelta(seconds=match.limits.max_real_time_seconds) > deadline:
+            longest = timedelta(seconds=match.limits.max_real_time_seconds + _START_AND_REPORT_SECONDS)
+            if datetime.now(UTC) + longest > deadline:
                 raise ScalaError("The match was ready too late to end by its deadline")
             logger.info(f"{description} on {offered['map']['name']}")
             result = self.engine.play(match, output_folder=match_folder / "output")
         except ScalaError as error:
             logger.error(f"{description} could not be played: {error}")
+            _remove_copies(match_folder)
             self.client.report_failure(offered["id"], str(error))
             return False
         except Exception as error:
+            _remove_copies(match_folder)
             with suppress(ServerError):
                 self.client.report_failure(offered["id"], f"The runner failed: {type(error).__name__}")
             raise
@@ -180,6 +185,7 @@ class Runner:
             )
         except ServerError as error:
             logger.error(f"{description}: {result.code.value}, which the server did not take: {error}")
+            _remove_copies(match_folder)
             return False
         logger.info(f"{description}: {result.code.value}, reported")
         shutil.rmtree(match_folder, ignore_errors=True)
@@ -234,7 +240,9 @@ class Runner:
         try:
             with self._lock:
                 self._prune_cache()
-                self._prune_kept_match_folders()
+                pruned_folders = self._kept_match_folders_to_prune()
+            for folder in pruned_folders:
+                shutil.rmtree(folder, ignore_errors=True)
         except OSError as error:
             logger.warning(f"Pruning the runner's folders failed: {error}")
 
@@ -255,17 +263,21 @@ class Runner:
                 total -= size
                 logger.info(f"Removed {path.name} from the cache, the least recently used")
 
-    def _prune_kept_match_folders(self) -> None:
+    def _kept_match_folders_to_prune(self) -> list[Path]:
+        """The kept match folders but the latest, none of them being played, which no match can take again since
+        each match has a folder of its own."""
         kept = sorted(
             (folder for folder in self._match_folders() if folder not in self._match_folders_in_play),
             key=lambda folder: int(folder.name.removeprefix(_MATCH_FOLDER_PREFIX)),
         )
-        for folder in kept[: max(len(kept) - self.kept_match_folders, 0)]:
-            shutil.rmtree(folder, ignore_errors=True)
+        return kept[: max(len(kept) - self.kept_match_folders, 0)]
 
     def remove_leftovers(self) -> None:
         """Removes what matches cut short left: their containers, if the runner was killed while they played, and
-        partial downloads; and prunes the cache and the kept match folders."""
+        partial downloads; and prunes the cache and the kept match folders.
+
+        Raises `EngineError` if the engine cannot remove a match's containers, before any folder is pruned.
+        """
         for folder in self._match_folders():
             self.engine.remove_leftovers(folder / "output")
         for partial in self.cache_folder.glob("*/*.partial"):
@@ -289,6 +301,12 @@ class Runner:
                 return
             self._last_note = message
         logger.info(message)
+
+
+def _remove_copies(match_folder: Path) -> None:
+    """Removes the bots and the map unpacked into a match folder that is kept, which the cache holds anyway."""
+    for copies in ("bots", "maps"):
+        shutil.rmtree(match_folder / copies, ignore_errors=True)
 
 
 def _seconds_until(moment: datetime) -> float:

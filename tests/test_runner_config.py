@@ -100,6 +100,8 @@ def test_days_are_listed_and_ranged_and_a_toml_time_is_a_time(tmp_path: Path) ->
         ('runners = "4"', "runners is a whole number"),
         ("runners = true", "runners is a whole number"),
         ("cache_gib = 0", "cache_gib is a positive number"),
+        ("cache_gib = inf", "cache_gib is a positive number"),
+        ("cache_gib = nan", "cache_gib is a positive number"),
         ("ladders = []", "no setting is named 'ladders'"),
         ('[window]\ndays = "mon"', "each window is a table of its own"),
         ('[[window]]\ndays = "monday"', "'monday' is no day"),

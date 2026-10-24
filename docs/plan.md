@@ -130,12 +130,12 @@ days = "sat-sun"
 A runner asks for a match only inside a window; one that crosses midnight belongs to the days it starts on, and with
 none, a runner plays at any hour. When a window closes, the runners take no new match and let those they play finish,
 which the real-time limit bounds, then wait for the next window to open. A match that is ready to start too late to end
-by its deadline, its bots slow to download say, is reported unplayed rather than started. `sc2scala runner stop`, or
-SIGTERM, as systemd sends, stops the runners once their matches end, and `--now`, or a second signal, stops the matches
-too, which voids them. One `runner start` runs per user. Every connection goes out from the machine, so a runner needs
-no open port, behind a home router or in WSL2. The machine keeps the bot versions and maps it downloaded, by their
-hash, the least recently used going once they pass `cache_gib`, and the folders of the 10 latest matches whose result
-it could not report.
+by its deadline, with 5 minutes to start and report, its bots slow to download say, is reported unplayed rather than
+started. `sc2scala runner stop`, or SIGTERM, as systemd sends, stops the runners once their matches end, and `--now`,
+SIGQUIT or a second Ctrl-C stops the matches too, which voids them. One `runner start` runs per user. Every connection
+goes out from the machine, so a runner needs no open port, behind a home router or in WSL2. The machine keeps the bot
+versions and maps it downloaded, by their hash, the least recently used going once they pass `cache_gib`, and the logs
+of the 10 latest matches it could not play or whose result the server did not take.
 
 A match of light bots takes about 2.2 GB and 1.5 cores at its peak (step 1), so `runner register` suggests one runner
 per 4 cores and 8 GiB. A ladder's default limits let one match take up to 15 GiB: 4 for each bot, 6 for the game and 1

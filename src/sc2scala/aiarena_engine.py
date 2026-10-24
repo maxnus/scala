@@ -97,7 +97,7 @@ class AiArenaEngine:
 
     def remove_leftovers(self, output_folder: Path) -> None:
         """Removes the containers of a match played into `output_folder`, if what played it was killed before it
-        could, which the work folder then still names."""
+        could, which the work folder then still names; raises `EngineError` if Docker Compose cannot."""
         project_file = output_folder / _WORK_FOLDER_NAME / _PROJECT_FILE_NAME
         if not project_file.is_file():
             return
@@ -106,15 +106,17 @@ class AiArenaEngine:
         log_file = output_folder / "logs" / "compose.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
         down = ["docker", "compose", "--project-name", project_name, "down", "--remove-orphans"]
-        if self._run_command([*down, "--timeout", str(_CONTAINER_STOP_SECONDS)], timeout=None, log_file=log_file) == 0:
-            project_file.unlink()
+        if self._run_command([*down, "--timeout", str(_CONTAINER_STOP_SECONDS)], timeout=None, log_file=log_file) != 0:
+            raise EngineError(f"Docker Compose could not remove the containers of {project_name}; see {log_file}")
+        project_file.unlink()
 
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         """Plays `match` as `MatchEngine.play` says.
 
         Raises `MatchTimeoutError` if the match runs past its real-time limit and a margin, `MatchStoppedError` if
         `stop_matches` stopped it, and `EngineError` for a Windows bot, or if Docker is missing, a container does not
-        start, or the engine reports no result.
+        start, or the engine reports no result. A match that raises leaves its work folder, but for its copies of the
+        bots and the map.
         """
         for bot in (match.player_1, match.player_2):
             if bot.bot_type == BotType.CPP_WIN32:
@@ -134,17 +136,23 @@ class AiArenaEngine:
         compose = ["docker", "compose", "--project-name", project_name, "--file", str(compose_file)]
 
         logger.info(f"Playing {match.player_1.name} against {match.player_2.name} on {match.map_name}")
-        real_time_seconds, seat_over_log_limit = self._play_in_containers(
-            match, compose=compose, project_name=project_name, work_folder=work_folder, compose_log=compose_log
-        )
-        replay_file = _move_replay(work_folder / "replays", output_folder)
-        _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
         try:
-            engine_result = _read_engine_result(work_folder / "results.json", compose_log=compose_log)
-        except EngineError:
-            if seat_over_log_limit is None:
-                raise
-            engine_result = {}
+            real_time_seconds, seat_over_log_limit = self._play_in_containers(
+                match, compose=compose, project_name=project_name, work_folder=work_folder, compose_log=compose_log
+            )
+            replay_file = _move_replay(work_folder / "replays", output_folder)
+            _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
+            try:
+                engine_result = _read_engine_result(work_folder / "results.json", compose_log=compose_log)
+            except EngineError:
+                if seat_over_log_limit is None:
+                    raise
+                engine_result = {}
+        except Exception:
+            if not self.keep_work_folder:
+                for copies in ("bots", "maps"):
+                    shutil.rmtree(work_folder / copies, ignore_errors=True)
+            raise
         if not self.keep_work_folder:
             try:
                 shutil.rmtree(work_folder)

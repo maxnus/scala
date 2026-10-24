@@ -3,6 +3,7 @@ import getpass
 import os
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,6 +13,7 @@ import httpx
 from loguru import logger
 
 from sc2scala.aiarena_engine import AiArenaEngine
+from sc2scala.client_credentials import default_credentials_file
 from sc2scala.match_engine import MatchEngine
 from sc2scala.runner import Runner
 from sc2scala.runner_config import (
@@ -29,8 +31,11 @@ from sc2scala.signed_in_client import signed_in_client
 _DEFAULT_POLL_SECONDS = 30.0
 _LOCK_FILE_NAME = "runner.pid"
 _SERVICE_NAME = "sc2scala-runner"
-_SERVICE_ENVIRONMENT = ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "DOCKER_HOST", "DOCKER_CONTEXT")
+_SERVICE_ENVIRONMENT = ("PATH", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "DOCKER_HOST", "DOCKER_CONTEXT")
 """The variables the service takes from the shell that writes it, so that it finds the same files and Docker."""
+_SECOND_SIGNAL_SECONDS = 1.0
+"""How long after a Ctrl-C another counts as a second: under `uv run`, the terminal's Ctrl-C reaches the runner, and
+uv forwards it again about 0.2 s later (uv 0.12)."""
 
 
 def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
@@ -70,7 +75,7 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
         help="play matches on this computer",
         description="Downloads the engine's images if missing, then plays the matches the server draws, as many at "
         "once and when the runner's settings say, in runner.toml beside its token. SIGTERM or Ctrl-C stops it once "
-        "the matches being played end, and a second stops them as well, as SIGQUIT does.",
+        "the matches being played end; a second Ctrl-C stops them as well, as SIGQUIT does.",
     )
     start.add_argument("--once", action="store_true", help="ask for one match, play it if there is one, and stop")
     start.add_argument(
@@ -114,18 +119,19 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
 
 
 def _register(args: argparse.Namespace, *, http: httpx.Client | None) -> None:
+    config_file = default_runner_config_file()
+    RunnerConfig.load(config_file)
     client = signed_in_client(args.server, http=http)
     machine = client.register_machine(args.name, serves_public=not args.no_public, ladders=args.ladders)
     RunnerCredentials(server_url=client.server_url, machine=machine["name"], token=machine["token"]).save()
     print(f"This computer is {machine['owner']}/{machine['name']} on {client.server_url}: {_serving(machine)}")
     print(f"Its token is kept in {default_runner_file()}")
-    config_file = default_runner_config_file()
     cores, memory_bytes = machine_cores_and_memory()
     if not config_file.exists():
         config_file.write_text(default_config_text(cores=cores, memory_bytes=memory_bytes), encoding="utf-8")
     config = RunnerConfig.load(config_file)
     print(
-        f"It plays {config.runners} {'match' if config.runners == 1 else 'matches'} at once, "
+        f"It plays {_matches(config.runners)} at once, "
         f"{'in its windows' if config.schedule.windows else 'at any hour'}, as {config_file} says; "
         f"about {suggested_runners(cores=cores, memory_bytes=memory_bytes)} fit this computer"
     )
@@ -150,9 +156,9 @@ def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: Match
             runner.play_next()
             return
         logger.info(
-            f"{credentials.machine} plays up to {config.runners} {'match' if config.runners == 1 else 'matches'} at "
-            f"once for {credentials.server_url}. Ctrl-C or `sc2scala runner stop` stops it once the matches being "
-            "played end, and a second time stops them too"
+            f"{credentials.machine} plays up to {_matches(config.runners)} at once for {credentials.server_url}. "
+            "Ctrl-C or `sc2scala runner stop` stops it once the matches being played end; a second Ctrl-C, or "
+            "`runner stop --now`, stops them too"
         )
         with _stopped_by_signals(runner):
             runner.run(poll_seconds=args.poll_seconds, workers=config.runners, schedule=config.schedule)
@@ -160,19 +166,27 @@ def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: Match
 
 @contextmanager
 def _stopped_by_signals(runner: Runner) -> Iterator[None]:
-    """Lets SIGTERM and SIGINT stop `runner` once its matches end, a second stop them too, and SIGQUIT stop them at
-    once, while the block runs."""
+    """Lets SIGTERM and SIGINT stop `runner` once its matches end, a second SIGINT stop them too, and SIGQUIT stop
+    them at once, while the block runs.
+
+    A second SIGTERM, from a second `runner stop`, stops nothing more, so that one says what it does.
+    """
+    first_interrupt: list[float] = []
 
     def stop(signal_number: int, frame: FrameType | None) -> None:
-        if runner.stopping:
-            runner.stop_now()
-        else:
+        runner.stop()
+
+    def interrupt(signal_number: int, frame: FrameType | None) -> None:
+        if not first_interrupt:
+            first_interrupt.append(time.monotonic())
             runner.stop()
+        elif time.monotonic() - first_interrupt[0] >= _SECOND_SIGNAL_SECONDS:
+            runner.stop_now()
 
     def stop_now(signal_number: int, frame: FrameType | None) -> None:
         runner.stop_now()
 
-    handlers = {signal.SIGTERM: stop, signal.SIGINT: stop, signal.SIGQUIT: stop_now}
+    handlers = {signal.SIGTERM: stop, signal.SIGINT: interrupt, signal.SIGQUIT: stop_now}
     previous = {number: signal.signal(number, handler) for number, handler in handlers.items()}
     try:
         yield
@@ -216,7 +230,7 @@ def _write_service() -> None:
 def _service_unit(*, python: str, environment: dict[str, str]) -> str:
     """The systemd user service that runs `sc2scala runner start` with `python`, and with `environment` set."""
     environment_lines = "".join(
-        f"Environment={_systemd_quoted(f'{name}={value}')}\n" for name, value in environment.items()
+        f"Environment={_systemd_quoted(f'{name}={value}', in_command=False)}\n" for name, value in environment.items()
     )
     return f"""\
 [Unit]
@@ -224,7 +238,7 @@ Description=sc2scala runner, playing StarCraft II matches between bots for a Sca
 After=docker.service
 
 [Service]
-ExecStart={_systemd_quoted(python)} -m sc2scala runner start
+ExecStart={_systemd_quoted(python, in_command=True)} -m sc2scala runner start
 Environment=PYTHONUNBUFFERED=1
 {environment_lines}Restart=on-failure
 RestartSec=60
@@ -238,9 +252,12 @@ WantedBy=default.target
 """
 
 
-def _systemd_quoted(argument: str) -> str:
-    """`argument` as one argument of a systemd unit's command line or setting, its specifiers escaped."""
-    escaped = argument.replace("%", "%%").replace("$", "$$")
+def _systemd_quoted(argument: str, *, in_command: bool) -> str:
+    """`argument` as one argument of a systemd unit's setting, its specifiers escaped, and in a command line its
+    variables too, which systemd expands there alone."""
+    escaped = argument.replace("%", "%%")
+    if in_command:
+        escaped = escaped.replace("$", "$$")
     if not any(character in escaped for character in " \t\"'\\"):
         return escaped
     return '"' + escaped.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -254,8 +271,13 @@ def _serving(machine: dict[str, object]) -> str:
     return f"serves {named}" if named else "serves no ladder"
 
 
+def _matches(count: int) -> str:
+    return f"{count} {'match' if count == 1 else 'matches'}"
+
+
 def _config_home() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    """The user's config folder, where the CLI keeps its own in `sc2scala`."""
+    return default_credentials_file().parent.parent
 
 
 def _cache_home() -> Path:

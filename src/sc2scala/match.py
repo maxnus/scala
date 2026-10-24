@@ -3,11 +3,12 @@ from pathlib import Path
 
 from sc2scala.bot import Bot
 from sc2scala.game_limits import GameLimits
+from sc2scala.resource_limits import ResourceLimits
 
 
 @dataclass(frozen=True)
 class Match:
-    """A match to play: two bots, in their seats, on a map, within limits.
+    """A match to play: two bots, in their seats, on a map, within limits of time and of resources.
 
     `map_file` is a `.SC2Map` file; any other suffix raises `ValueError`.
     """
@@ -16,6 +17,7 @@ class Match:
     player_2: Bot
     map_file: Path
     limits: GameLimits = field(default_factory=GameLimits)
+    resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
 
     def __post_init__(self) -> None:
         if self.map_file.suffix != ".SC2Map":

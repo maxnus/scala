@@ -14,7 +14,7 @@ class BotType(StrEnum):
     NODEJS = "nodejs"
     """`node <name>.js`"""
     CPP_WIN32 = "cppwin32"
-    """`wine <name>.exe`"""
+    """`wine <name>.exe`, which AI Arena's v0.8.0 bot image cannot run: it holds no Wine."""
     CPP_LINUX = "cpplinux"
     """`./<name>`"""
     LINUX = "linux"

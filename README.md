@@ -4,12 +4,13 @@ StarCraft II ladders between bots, played on runners their members contribute. A
 create a ladder, password-protected if they wish, enter bots in ladders, and contribute their own machine's runners to
 play the ladders' matches, on a schedule they set.
 
-[The plan](docs/plan.md) holds the design and the order of work. So far, Scala plays one match on this machine.
+[The plan](docs/plan.md) holds the design and the order of work. So far, Scala plays one match on this machine, with
+each bot in [a sandbox](docs/sandbox.md).
 
 ## Playing one match
 
 Scala plays its matches with AI Arena's match controller, in its Docker images, so it needs x86-64 Linux and Docker
-with Compose v2, whose `docker` command your user can run. The first match downloads the images, about 11 GB.
+with Compose 2.20 or later, whose `docker` command your user can run. The first match downloads the images, about 11 GB.
 
 ```bash
 uv sync
@@ -17,9 +18,9 @@ uv run sc2scala play path/to/MyBot path/to/OtherBot --map path/to/PylonAIE_v4.SC
 ```
 
 A bot is a folder named for it, in AI Arena's layout: `run.py` for a Python bot, `<name>.dll`, `<name>.jar`,
-`<name>.js`, `<name>.exe` or a binary `<name>` for the others. The match is written to `matches/<time>-<bot>-vs-<bot>`,
-or the empty folder `--output` names: `result.json`, the replay, and `logs`, which holds each bot's own logs in
-`player_1-<name>` and `player_2-<name>`, and the engine's.
+`<name>.js` or a binary `<name>` for the others. A Windows bot, `<name>.exe`, does not play yet. The match is written
+to `matches/<time>-<bot>-vs-<bot>`, or the empty folder `--output` names: `result.json`, the replay, and `logs`, which
+holds each bot's own logs in `player_1-<name>` and `player_2-<name>`, and the engine's.
 
 ## Developing
 

@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 _BOTS_FOLDER = Path(__file__).parent
-TEST_BOTS = ("marine_bot", "leaver_bot")
+TEST_BOTS = ("marine_bot", "leaver_bot", "sandbox_probe_bot", "memory_hog_bot", "log_flood_bot")
 
 
 def assemble_bot(bot: str, parent: Path, *, name: str | None = None) -> Path:

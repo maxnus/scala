@@ -10,6 +10,7 @@ from sc2scala.match import Match
 from sc2scala.match_engine import MatchEngine
 from sc2scala.match_result import MatchResult
 from sc2scala.race import Race
+from sc2scala.resource_limits import ResourceLimits
 from sc2scala.result_code import ResultCode
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "MatchResult",
     "MatchTimeoutError",
     "Race",
+    "ResourceLimits",
     "ResultCode",
     "ScalaError",
     "__version__",

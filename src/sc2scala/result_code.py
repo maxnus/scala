@@ -16,3 +16,11 @@ class ResultCode(StrEnum):
     INITIALIZATION_ERROR = "InitializationError"
     """A bot or the game did not start."""
     ERROR = "Error"
+
+    @classmethod
+    def crash_of(cls, seat: int) -> "ResultCode":
+        """The crash of the player in `seat`, 1 or 2; raises `ValueError` for any other."""
+        crashes = {1: cls.PLAYER_1_CRASH, 2: cls.PLAYER_2_CRASH}
+        if seat not in crashes:
+            raise ValueError(f"A seat is 1 or 2, not {seat}")
+        return crashes[seat]

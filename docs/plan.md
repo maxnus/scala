@@ -28,8 +28,8 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
    Glicko-2 and TrueSkill do, and it does not depend on the order the games were played in. Computer chess rating
    lists rate engines this way (CCRL, with BayesElo). A new version of a bot starts a new rating.
 5. **The engine is Linux, and Windows runs it in WSL2.** The app, Docker and the engine run inside the WSL2
-   distribution, and the server's pages open in the Windows browser. Windows bots run too: the engine starts a
-   `cppwin32` bot under Wine.
+   distribution, and the server's pages open in the Windows browser. Windows bots do not play for now: the engine's
+   code starts a `cppwin32` bot under Wine, but its v0.8.0 bot image holds none (found in step 2).
 6. **A repository of its own, in Python**: `maxnus/scala`, shipped as `sc2scala`, the package, the import and the
    command, as NachOS ships as `sc2nachos`. Bots talk to the engine through the ladder's command line (`--GamePort`,
    `--StartPort`, `--LadderServer`, `--OpponentId`), so a bot on any library plays.
@@ -48,7 +48,7 @@ starts the bot as its type says:
 | `<name>.dll` | `dotnet <name>.dll` | `dotnetcore` |
 | `<name>.jar` | `java -jar <name>.jar` | `java` |
 | `<name>.js` | `node <name>.js` | `nodejs` |
-| `<name>.exe` | `wine <name>.exe` | `cppwin32` |
+| `<name>.exe` | `wine <name>.exe`, refused: the v0.8.0 bot image holds no Wine | `cppwin32` |
 | `<name>` | `./<name>` | `cpplinux` |
 
 The engine finds the entry point by the bot's name, so a name follows its rules, and an upload is checked for one when
@@ -130,14 +130,16 @@ Linux, Docker Engine with Compose, and the app.
 
 ### The sandbox
 
-A runner executes strangers' code, so before it plays any bot but its owner's, every match runs:
+A runner executes strangers' code, so every match runs sandboxed, as [the sandbox](sandbox.md) says in full:
 
-- each bot's container with its own bot folder alone (AI Arena's local setup mounts every bot into both);
-- on a network with no way out, so that a bot reaches the proxy and nothing else;
-- with memory and CPU limits on each bot, and no privileges;
+- each bot's container with its own bot folder alone, read-only but for its `data` folder and `/tmp`, held in memory;
+- on internal networks, one for each bot and one for the game, so that a bot reaches the proxy and nothing else;
+- as the runner's user, with no capabilities and no way to gain any;
+- within each bot's limits of CPU, memory, processes and logs, `ResourceLimits`, set by the ladder;
 - in fresh containers, with nothing of the runner's own, its token least of all, mounted anywhere.
 
-Tested with a bot that tries to reach the internet, read its opponent's files and grow past its memory limit.
+A runner that plays strangers' bots runs as a user of its own, with rootless Docker, so that a bot that breaks out
+lands as a user who owns nothing of its owner's.
 
 ### The server
 
@@ -157,7 +159,8 @@ Each step ends in something that runs, and is a pull request of its own.
 1. **One match, no server.** Done: `sc2scala play <bot folder> <bot folder> --map <map>` plays one match through the
    engine and writes the result and the replay, and `tools/measure_match.py` measures the memory and CPU of one match,
    which sets how many runners a machine can take.
-2. **The sandbox**, as above, with its tests.
+2. **The sandbox.** Done: as above, tested by bots that try to break each wall. The rootless setup is documented, and
+   not yet tried.
 3. **The server and one runner.** Accounts, bots and versions, public and protected ladders, the matches as above,
    results, ratings, and each ladder's page with its standings, matches and replays. A runner plays one match at a time,
    at any hour.

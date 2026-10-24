@@ -1,16 +1,19 @@
 # A runner on Windows, in WSL2
 
 > **Untested.** Nobody has followed this guide on a Windows machine yet. It is written from Microsoft's documentation
-> of WSL and from the Linux setup it repeats, as of October 2026. If a step does not work as written, please open an
-> issue with what you saw, so that the guide can say what Windows does.
+> of WSL and from the Linux setup it repeats, as of October 2026. If a step does not work as written, please say what
+> you saw, in an issue if you can reach the repository, or to the owner of the server you run for, so that the guide
+> can say what Windows does.
 
 On Windows, Scala runs as it does on Linux, inside a Linux distribution that WSL2 runs in a virtual machine: the app,
 Docker and the engine all run there, and the server's pages open in the Windows browser. What differs from Linux is
 only how the distribution is made, how much of the machine it gets, and how it is kept running. Windows bots do not
 play, here or on Linux (see [the plan](plan.md), decision 5).
 
-A runner needs Windows 11, or Windows 10 22H2, on an x86-64 machine with virtualization turned on in its firmware, and
-about 50 GB free on the drive WSL keeps its disks on, `C:` by default: the engine's images take 28 GB once unpacked.
+A runner needs Windows 11 on an x86-64 machine with virtualization turned on in its firmware, and about 50 GB free on
+the drive WSL keeps its disks on, `C:` by default: the engine's images take 28 GB once unpacked. Microsoft documents
+the setting that turns systemd on for Windows 11 and Windows Server 2022 alone; Windows 10 22H2, with WSL from the
+Microsoft Store, may work too.
 
 ## 1. Install WSL2 and Ubuntu
 
@@ -60,19 +63,21 @@ may take and no idle shutdown:
 [wsl2]
 memory=24GB
 processors=12
-vmIdleTimeout=-1
 
 [general]
 instanceIdleTimeout=-1
 ```
 
 The figures are an example: `sc2scala runner register` suggests one runner per 4 cores and 8 GiB of what WSL is given,
-so these fit 3. `vmIdleTimeout` is read on Windows 11 alone. Run `wsl --shutdown` for the file to take effect; it stops
-the runner too, and voids the matches it was playing.
+so these fit 3. `instanceIdleTimeout=-1` keeps WSL from stopping the distribution 15 seconds after its last window
+closes, and the virtual machine stops only once no distribution runs. Run `wsl --shutdown` for the file to take effect;
+it stops the runner too, and voids the matches it was playing.
 
 ## 4. Install Docker inside Ubuntu
 
-Install Docker Engine and Compose in the distribution, as on Ubuntu itself, rather than Docker Desktop:
+Install Docker Engine and Compose in the distribution, as on Ubuntu itself, rather than Docker Desktop. If Docker
+Desktop is installed, first turn off its WSL integration for Ubuntu-24.04, in its Settings > Resources > WSL
+integration, so that its `docker` does not take the place of this one:
 
 ```bash
 sudo apt update
@@ -94,17 +99,19 @@ cat /sys/fs/cgroup/cgroup.controllers
 The third prints `2`, and the fourth lists `cpu`, `memory` and `pids`. WSL mounts cgroup v2 unless `/etc/wsl.conf`
 asks for v1.
 
-Docker Desktop also runs in WSL2, but its containers run in a distribution of its own and its `docker` replaces the
-one above; Scala has not been tried with it.
+Docker Desktop runs its containers in a distribution of its own; Scala has not been tried with it.
 
 ## 5. Install Scala and register the runner
 
 As on Linux, in Ubuntu, and in Ubuntu's own file system, under `~`, rather than under `/mnt/c`, which is far slower.
-The repository is private for now, so cloning it needs access to it:
+The repository is private for now, so cloning it needs a GitHub account with access to it, signed in with `gh`:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-git clone https://github.com/maxnus/scala.git ~/scala
+source ~/.local/bin/env
+sudo apt install gh
+gh auth login
+gh repo clone maxnus/scala ~/scala
 cd ~/scala
 uv sync
 uv run sc2scala login https://scala.example.org
@@ -130,7 +137,7 @@ The last line starts the user's services whenever the distribution starts, with 
 
 WSL stops a distribution once no Windows program uses it, even with systemd services running in it, and the idle
 settings of step 3 do not always prevent it. A program that never ends keeps it running: a task that starts one when
-you log on to Windows, which this makes, in PowerShell:
+you log on to Windows, which this makes, in PowerShell run as administrator from your own account:
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
@@ -146,10 +153,11 @@ are logged on; one that starts at boot, with nobody logged on, is not covered he
 
 ## 8. Mind sleep and updates
 
-While Windows sleeps, the runner stops, and a match it was playing runs out of time and is void; the next is drawn
-afresh, so nothing is lost but the match. Set the runner's windows in `runner.toml` to the hours the machine is awake,
-or keep it from sleeping then, in Settings > System > Power. A restart for Windows Update stops the runner the same way,
-and the task of step 7 starts it again at the next logon.
+While Windows sleeps, the runner pauses, and a match it was playing is void if it cannot report by its deadline, the
+ladder's real-time limit and 15 minutes after the match was drawn; the next match is drawn afresh, so nothing is lost
+but that match. Set the runner's windows in `runner.toml` to the hours the machine is awake, or keep it from sleeping
+then, in Settings > System > Power, or Power & battery on a laptop. A restart for Windows Update stops the runner and
+voids its matches, and the task of step 7 starts it again at the next logon.
 
 ## A runner of its own
 

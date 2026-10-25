@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_forms.html" import race_options, zip_note %}
 {% block title %}{{ user.login }} · Scala{% endblock %}
 {% block main %}
   <h1>{{ user.login }}</h1>
@@ -26,8 +27,17 @@
       </tbody>
     </table>
   {% else %}
-    <p class="muted">None yet: upload one with <code>sc2scala bot upload NAME FOLDER --race T</code>.</p>
+    <p class="muted">None yet.</p>
   {% endif %}
+  {% set kept = notice.kept if notice and notice.kept else {} %}
+  <form method="post" action="/bots" enctype="multipart/form-data" class="row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name <input name="name" required maxlength="50" pattern="[A-Za-z0-9_.\-]+" value="{{ kept.get('name', '') }}"></label>
+    <label>Race <select name="race">{{ race_options(races, kept.get("race", "")) }}</select></label>
+    <label>Zip <input type="file" name="archive" accept=".zip,application/zip" required></label>
+    <button type="submit">Upload a new bot</button>
+  </form>
+  {{ zip_note() }}
   <h2>Your runner machines</h2>
   {% if machines %}
     <table>

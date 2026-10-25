@@ -62,7 +62,8 @@ def test_an_unsafe_or_unplayable_zip_is_refused_and_not_kept(server: TestClient)
         "a path out of the folder": zip_of({"run.py": b"", "../escape.py": b""}),
         "an absolute path": zip_of({"run.py": b"", "/etc/cron.d/bot": b""}),
         "no entry point": zip_of({"bot.py": b""}),
-        "an entry point below the root": zip_of({"basic_bot/run.py": b""}),
+        "an entry point below the bot's folder": zip_of({"basic_bot/inner/run.py": b""}),
+        "files in two folders": zip_of({"basic_bot/run.py": b"", "other/notes.txt": b""}),
         "a Windows bot": zip_of({"basic_bot.exe": b"MZ"}),
         "not a zip": b"PK but not quite",
     }

@@ -5,6 +5,7 @@
   --surface: #f4f5f7;
   --border: #d9dce1;
   --accent: #2457c5;
+  --refused: #b3261e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -15,6 +16,7 @@
     --surface: #202328;
     --border: #3a3e45;
     --accent: #8ab4f8;
+    --refused: #f2b8b5;
   }
 }
 
@@ -57,8 +59,9 @@ pre {
   overflow-x: auto;
 }
 
-input { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px;
-  background: var(--background); color: var(--text); }
+input, select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--background); color: var(--text); max-width: 100%; }
+input[type="file"] { padding: 3px 0; border: none; }
 
 button, a.button {
   font: inherit;
@@ -95,3 +98,10 @@ table.pairs td.ahead { background: color-mix(in srgb, var(--accent) 14%, transpa
 table.pairs td.behind { background: color-mix(in srgb, var(--muted) 14%, transparent); }
 section.owned { margin-top: 32px; }
 td.when, th { white-space: nowrap; }
+form.row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+form.row label { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+form.inline { display: inline; margin: 0; }
+td.actions { white-space: nowrap; }
+td.actions form + form { margin-left: 12px; }
+.notice { padding: 8px 12px; border: 1px solid var(--accent); border-radius: 6px; }
+.notice.refused { border-color: var(--refused); color: var(--refused); }

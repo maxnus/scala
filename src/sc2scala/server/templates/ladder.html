@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_forms.html" import entry_actions %}
 {% block title %}{{ ladder.name }} · Scala{% endblock %}
 {% block main %}
   <h1>{{ ladder.name }}</h1>
@@ -15,7 +16,7 @@
         <tr>
           <th class="number">#</th><th>Bot</th><th>Author</th><th>Race</th><th class="number">Version</th>
           <th class="number">Rating</th><th class="number">Games</th><th class="number">Won–lost–tied</th>
-          <th class="number">Crashes</th><th></th>
+          <th class="number">Crashes</th><th></th>{% if user %}<th></th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -31,7 +32,8 @@
             <td class="number">{{ rating.games if rating else 0 }}</td>
             <td class="number">{% if rating %}{{ rating.wins }}–{{ rating.losses }}–{{ rating.ties }}{% endif %}</td>
             <td class="number">{{ rating.crashes if rating else "" }}</td>
-            <td class="muted">{% if standing.entry.paused %}paused: {{ standing.entry.paused_because }}{% endif %}</td>
+            <td class="muted">{{ standing.entry.paused_note }}</td>
+            {% if user %}<td class="actions">{{ entry_actions(standing.entry, user, csrf_token, request.url.path, may_withdraw(standing.entry)) }}</td>{% endif %}
           </tr>
         {% endfor %}
       </tbody>
@@ -43,7 +45,23 @@
       all. A new version starts a new rating, held near the middle at first by a prior of {{ prior_sd | int }} points.
     </p>
   {% else %}
-    <p class="muted">No bot is entered yet. Enter one with <code>sc2scala ladder enter {{ ladder.name }} BOT</code>.</p>
+    <p class="muted">No bot is entered yet.</p>
+  {% endif %}
+  {% if may_enter %}
+    {% if enterable_bots %}
+      <form method="post" action="/ladders/{{ ladder.name }}/entries" class="row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next_page" value="{{ request.url.path }}">
+        <label>Your bot <select name="bot">{% for bot in enterable_bots %}<option>{{ bot.name }}</option>{% endfor %}</select></label>
+        <button type="submit">Enter it</button>
+      </form>
+    {% elif has_bots %}
+      <p class="muted">Every bot of yours with a version is in this ladder; upload another on <a href="/account">your page</a>.</p>
+    {% else %}
+      <p class="muted">To enter a bot here, upload one on <a href="/account">your page</a>.</p>
+    {% endif %}
+  {% elif not user %}
+    <p class="muted"><a href="/sign-in?next={{ request.url.path | urlencode }}">Sign in</a> to enter a bot.</p>
   {% endif %}
   <h2>Latest matches</h2>
   {% include "_matches_table.html" %}

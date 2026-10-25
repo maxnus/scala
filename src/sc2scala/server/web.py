@@ -1,13 +1,15 @@
-"""What the server's routes share: the database session, who is signed in, forms' CSRF tokens, and the templates."""
+"""What the server's routes share: the database session, who is signed in, forms' CSRF tokens and notices, and the
+templates."""
 
 import re
 import secrets
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +17,9 @@ from sc2scala.server.api_tokens import hash_of_token
 from sc2scala.server.models import ApiToken, RunnerMachine, User, utc_now
 
 _CSRF_SESSION_KEY = "csrf_token"
+_NOTICE_SESSION_KEY = "notice"
+_LONGEST_NOTICE = 300
+"""The most characters a notice keeps, of a message or of a field kept, so that the session's cookie stays small."""
 _USER_SESSION_KEY = "user_id"
 _LAST_USE_PRECISION = timedelta(minutes=1)
 """How stale a token's time of last use may grow before a request brings it up to date."""
@@ -44,8 +49,11 @@ def signed_in_user(request: Request, session: DatabaseSession) -> User | None:
 
 
 def required_user(request: Request, user: Annotated[User | None, Depends(signed_in_user)]) -> User:
-    """Whoever is signed in; raises `SignInRequired` if nobody is."""
+    """Whoever is signed in; raises `SignInRequired` if nobody is, to come back to the page asked for, or for a form
+    sent, to the page it was sent from."""
     if user is None:
+        if request.method != "GET":
+            raise SignInRequired(local_path_or(urlsplit(request.headers.get("referer", "")).path, "/"))
         query = request.url.query
         raise SignInRequired(f"{request.url.path}?{query}" if query else request.url.path)
     return user
@@ -128,10 +136,41 @@ def check_csrf(request: Request, submitted: str) -> None:
 def render(
     request: Request, template: str, *, user: User | None, status_code: int = 200, **context: Any
 ) -> HTMLResponse:
-    """The page `template`, given who is signed in, the session's form token and `context`."""
+    """The page `template`, given who is signed in, the session's form token, the notice a form left, and `context`."""
     return request.app.state.templates.TemplateResponse(
         request,
         template,
-        {"user": user, "csrf_token": csrf_token(request), **context},
+        {
+            "user": user,
+            "csrf_token": csrf_token(request),
+            "notice": _notice_for(request),
+            **context,
+        },
         status_code=status_code,
     )
+
+
+def redirect_with_notice(
+    request: Request, path: str, message: str, *, refused: bool = False, kept: dict[str, str] | None = None
+) -> RedirectResponse:
+    """Sends the browser to `path`, whose page then shows `message` once: what a form did, or why it was `refused`,
+    with what it held that the page fills in again, `kept`; each cut to 300 characters."""
+    request.session[_NOTICE_SESSION_KEY] = {
+        "path": path,
+        "message": _shortened(message),
+        "refused": refused,
+        "kept": {name: _shortened(value) for name, value in (kept or {}).items()},
+    }
+    return RedirectResponse(path, status_code=303)
+
+
+def _notice_for(request: Request) -> dict[str, Any] | None:
+    """The notice a form left for this page, which it takes, so that no other page, in another tab say, shows it."""
+    notice = request.session.get(_NOTICE_SESSION_KEY)
+    if notice is None or notice.get("path") != request.url.path:
+        return None
+    return request.session.pop(_NOTICE_SESSION_KEY)
+
+
+def _shortened(text: str) -> str:
+    return text if len(text) <= _LONGEST_NOTICE else f"{text[: _LONGEST_NOTICE - 1]}…"

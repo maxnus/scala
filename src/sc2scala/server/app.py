@@ -20,6 +20,7 @@ from sc2scala.errors import SignInError, UploadRefusedError, UploadTooLargeError
 from sc2scala.server import (
     account_routes,
     api_routes,
+    bot_forms,
     bots_api,
     ladder_runners_api,
     ladders_api,
@@ -87,6 +88,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(runners_api.router)
     app.include_router(runner_api.router)
     app.include_router(matches_api.router)
+    app.include_router(bot_forms.router)
     app.include_router(pages.router)
 
     @app.exception_handler(StarletteHTTPException)

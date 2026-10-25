@@ -191,6 +191,15 @@ class LadderEntry(Base):
     ladder: Mapped[Ladder] = relationship(back_populates="entries")
     bot: Mapped[BotRecord] = relationship()
 
+    @property
+    def paused_note(self) -> str:
+        """Why the entry is paused, as a page shows it: "paused by alice", or "paused: failed to start 5 times in a
+        row"; empty if it is not."""
+        if not self.paused:
+            return ""
+        because = self.paused_because or ""
+        return because if because.startswith("paused") else f"paused: {because}".rstrip(": ")
+
 
 runner_machine_ladders = Table(
     "runner_machine_ladders",

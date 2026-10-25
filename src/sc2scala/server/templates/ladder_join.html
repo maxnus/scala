@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ ladder.name }} · Scala{% endblock %}
+{% block main %}
+  <h1>{{ ladder.name }}</h1>
+  <p class="muted">By {{ ladder.owner.login }}, protected</p>
+  <p>Only its members see this ladder. Whoever gives its password once becomes one.</p>
+  {% if user %}
+    <form method="post" action="/ladders/{{ ladder.name }}/join" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Password <input type="password" name="password" required autocomplete="off"></label>
+      <button type="submit">Join</button>
+    </form>
+  {% else %}
+    <p><a class="button" href="/sign-in?next={{ ('/ladders/' ~ ladder.name) | urlencode }}">Sign in to join</a></p>
+  {% endif %}
+{% endblock %}

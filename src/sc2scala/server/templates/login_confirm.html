@@ -4,8 +4,8 @@
   <h1>Sign a command in</h1>
   {% if login %}
     <p>
-      <strong>{{ login.name }}</strong>{% if login.from_address %}, from {{ login.from_address }},{% endif %} asks to act
-      for you, {{ user.login }}, on this server: to upload bots, enter them, and register runners.
+      A command that calls itself “{{ login.name }}”{% if login.from_address %}, from {{ login.from_address }},{% endif %}
+      asks to act for you, {{ user.login }}, on this server: to upload bots, enter them, and register runners.
     </p>
     <p class="code-to-compare">{{ login.code }}</p>
     <p>Confirm only if your terminal shows this same code. If you did not run <code>sc2scala login</code> just now, refuse.</p>

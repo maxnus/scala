@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from sc2scala.server.api_tokens import hash_of_token, new_runner_token
+from sc2scala.api_tokens import hash_of_token, new_runner_token
 from sc2scala.server.bots_api import commit_or_conflict
 from sc2scala.server.ladder_runners_api import barred_from
 from sc2scala.server.ladders_api import visible_ladder

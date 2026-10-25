@@ -1,3 +1,5 @@
+"""Scala's tokens, which the server keeps as hashes, and which a command signing in through the browser makes itself."""
+
 import hashlib
 import secrets
 

@@ -73,7 +73,8 @@ uv run sc2scala ladder standings night-league
 
 `--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala ladder runners LADDER` lists
 the machines that played a ladder's matches, and its owner bars one with `sc2scala ladder bar-runner LADDER
-OWNER/MACHINE`, or `--keep-results`, and lifts the bar with `unbar-runner`. `sc2scala --help` lists the rest.
+OWNER/MACHINE`, which voids its results there unless given `--keep-results`, and lifts the bar with `unbar-runner`.
+`sc2scala --help` lists the rest.
 
 ## Playing one match
 

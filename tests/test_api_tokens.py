@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from sc2scala.server.api_tokens import hash_of_token
+from sc2scala.api_tokens import hash_of_token
 from sc2scala.server.models import ApiToken
 from tests.conftest import csrf_of, sign_in_dev
 

@@ -32,8 +32,11 @@ _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CODE_HALF_LENGTH = 4
 _MOST_WAITING = 1000
 """How many requests may wait at once, so that requests nobody confirms cannot fill the database."""
+_MOST_WAITING_FROM_ONE_ADDRESS = 5
+"""How many may wait from one address, so that no one address can keep the others from signing in."""
+_NAME_PATTERN = re.compile(r"[A-Za-z0-9 ._()-]{1,60}")
+"""What a command may call itself: plain words, as `sc2scala on <host>`, too short to pass for the server speaking."""
 _TOKEN_HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
-_LONGEST_NAME = 100
 _CONFIRM_PAGE = "/login"
 
 SignedInUser = Annotated[User, Depends(required_user)]
@@ -55,18 +58,27 @@ def request_login(request: Request, session: DatabaseSession, body: LoginRequest
     """
     if not _TOKEN_HASH_PATTERN.fullmatch(body.token_hash):
         raise HTTPException(422, "token_hash is the SHA-256 of the token, in lower-case hex")
+    name = body.name.strip()
+    if not _NAME_PATTERN.fullmatch(name):
+        raise HTTPException(422, "name is letters, digits, spaces and . _ ( ) -, 60 at most")
     now = utc_now()
+    address = request.client.host if request.client else None
     session.execute(delete(LoginRequest).where(LoginRequest.expires_at < now))
     if (session.scalar(select(func.count()).select_from(LoginRequest)) or 0) >= _MOST_WAITING:
         raise HTTPException(503, "Too many sign-ins are waiting to be confirmed; try again in a few minutes")
+    from_address = select(func.count()).select_from(LoginRequest).where(LoginRequest.from_address == address)
+    if address is not None and (session.scalar(from_address) or 0) >= _MOST_WAITING_FROM_ONE_ADDRESS:
+        raise HTTPException(
+            429, "Too many sign-ins wait from this address; confirm or refuse them, or wait ten minutes"
+        )
     known = select(ApiToken.id).where(ApiToken.token_hash == body.token_hash)
     if session.scalar(known) is not None or _waiting_by_hash(session, body.token_hash) is not None:
         raise HTTPException(409, "That token is known already; make another")
     login = LoginRequest(
         code=_new_code(session),
         token_hash=body.token_hash,
-        name=body.name.strip()[:_LONGEST_NAME] or "sc2scala",
-        from_address=request.client.host if request.client else None,
+        name=name,
+        from_address=address,
         requested_at=now,
         expires_at=now + LOGIN_REQUEST_LIFETIME,
     )

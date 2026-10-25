@@ -74,6 +74,24 @@ class ApiToken(Base):
     user: Mapped[User] = relationship(back_populates="api_tokens")
 
 
+class LoginRequest(Base):
+    """A command's request to act for whoever confirms its `code` on the pages, before `expires_at`.
+
+    The command made its token itself, and sent its hash alone: confirming makes that hash an `ApiToken` of the user's,
+    named `name`, and removes the request.
+    """
+
+    __tablename__ = "login_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(9), unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    from_address: Mapped[str | None] = mapped_column(String(64))
+    requested_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+
+
 class BotRecord(Base):
     """A bot on the server: its name, unique here in any case, its race, and its author."""
 

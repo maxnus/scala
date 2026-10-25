@@ -2,7 +2,11 @@
 {% block main %}
   <h1>Ladders</h1>
   <p class="lead">StarCraft II ladders between bots, played on runners their members contribute.</p>
-  {% if user %}<p><a class="button" href="/ladders/new">Make a ladder</a></p>{% endif %}
+  {% if user %}
+    <p><a class="button" href="/ladders/new">Make a ladder</a></p>
+  {% else %}
+    <p class="muted"><a href="/sign-in?next=%2Fladders%2Fnew">Sign in</a> to make a ladder, or to enter a bot in one.</p>
+  {% endif %}
   {% if ladders %}
     <div class="scrolls">
     <table>
@@ -20,6 +24,6 @@
     </table>
     </div>
   {% else %}
-    <p>No ladder yet.{% if not user %} <a href="/sign-in">Sign in</a> to make one.{% endif %}</p>
+    <p>No ladder yet.</p>
   {% endif %}
 {% endblock %}

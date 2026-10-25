@@ -25,6 +25,7 @@ from sc2scala.server import (
     ladder_forms,
     ladder_runners_api,
     ladders_api,
+    login_requests,
     machine_forms,
     matches_api,
     pages,
@@ -93,6 +94,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(bot_forms.router)
     app.include_router(ladder_forms.router)
     app.include_router(machine_forms.router)
+    app.include_router(login_requests.router)
     app.include_router(pages.router)
 
     @app.exception_handler(StarletteHTTPException)

@@ -36,12 +36,12 @@ def test_login_keeps_the_token_for_this_user_alone(
     assert stat.S_IMODE(credentials_file.stat().st_mode) == 0o600
 
 
-def test_login_asks_for_the_token_when_not_given(
-    server: TestClient, token: str, credentials_file: Path, monkeypatch: pytest.MonkeyPatch
+def test_an_empty_token_is_refused_with_where_to_make_one(
+    server: TestClient, credentials_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("getpass.getpass", lambda prompt: token)
-    assert main(["login", "http://localhost"], http=server) == 0
-    assert credentials_file.is_file()
+    assert main(["login", "http://localhost", "--token", " "], http=server) == 1
+    assert "The token is empty: make one on http://localhost/account" in capsys.readouterr().err
+    assert not credentials_file.exists()
 
 
 def test_a_token_the_server_refuses_is_not_kept(server: TestClient, credentials_file: Path) -> None:

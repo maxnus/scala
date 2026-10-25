@@ -114,3 +114,4 @@ fieldset.limits input { width: 9em; }
 details summary { cursor: pointer; color: var(--accent); }
 details.machine { margin-top: 4px; }
 button.secondary { background: none; color: var(--accent); }
+.code-to-compare { font: 600 28px/1.2 ui-monospace, "SFMono-Regular", Menlo, monospace; letter-spacing: 0.08em; margin: 16px 0; }

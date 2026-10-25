@@ -33,6 +33,21 @@ class ScalaClient:
         """The login of the user whose token this is."""
         return str(self._request("GET", "/api/me")["login"])
 
+    def request_login(self, *, token_hash: str, name: str) -> dict[str, Any]:
+        """Asks the server to sign in the token whose hash this is once someone confirms it in the browser; answers
+        with the code to confirm, the page to confirm it on, and when the request expires. Needs no token."""
+        return self._request("POST", "/api/login-requests", json={"token_hash": token_hash, "name": name})
+
+    def login_request_waits(self, code: str) -> bool:
+        """Whether the sign-in with `code` still waits to be confirmed, rather than refused, expired or confirmed."""
+        try:
+            self._request("GET", f"/api/login-requests/{code}")
+        except ServerError as error:
+            if error.status_code == 404:
+                return False
+            raise
+        return True
+
     def upload_bot_version(self, name: str, archive: Path, *, race: str | None) -> dict[str, Any]:
         """Uploads the zip `archive` as a version of the bot `name`, which is made at its first upload."""
         with archive.open("rb") as archive_file:
@@ -182,7 +197,7 @@ class ScalaClient:
         return self._request("POST", f"/api/runner/matches/{match_id}/failure", json={"reason": reason})
 
     def _authorization(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._token}"}
+        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     def _raise_for_error(self, response: httpx.Response) -> None:
         if response.status_code == 401:

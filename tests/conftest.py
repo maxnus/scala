@@ -45,6 +45,16 @@ def server_config_in(data_folder: Path, *, dev_sign_in: bool = True) -> ServerCo
     )
 
 
+@pytest.fixture(autouse=True)
+def no_browser_opens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fails a test that would open a browser on the machine running it, as `sc2scala login` does."""
+
+    def refuse(url: str, *args: object, **options: object) -> bool:
+        raise AssertionError(f"A test tried to open {url} in a browser")
+
+    monkeypatch.setattr("webbrowser.open", refuse)
+
+
 @pytest.fixture
 def fake_github() -> FakeGitHub:
     return FakeGitHub()

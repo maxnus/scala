@@ -118,8 +118,10 @@ uv run sc2scala login https://scala.example.org
 uv run sc2scala runner register my-pc
 ```
 
-`runner register` suggests how many runners fit what WSL was given in step 3, and writes the runner's settings,
-`~/.config/sc2scala/runner.toml`, as the [README](../README.md#running-matches) says.
+`login` shows a code and the server's page, which WSL may open in the Windows browser; if it opens none, open the page
+there yourself, and confirm the code. `runner register` suggests how many runners fit what WSL was given in step 3, and
+writes the runner's settings, `~/.config/sc2scala/runner.toml`, as the [README](../README.md#contributing-a-runner)
+says.
 
 ## 6. Run the runner as a service
 

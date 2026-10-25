@@ -1,6 +1,6 @@
 import random
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +25,7 @@ from sc2scala.server import (
     ladder_forms,
     ladder_runners_api,
     ladders_api,
+    login_requests,
     machine_forms,
     matches_api,
     pages,
@@ -80,6 +81,15 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
         same_site="lax",
         https_only=config.public_url.startswith("https://"),
     )
+
+    @app.middleware("http")
+    async def forbid_framing(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        """Keeps every page out of other sites' frames, where a hidden page could take a signed-in user's click."""
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        return response
+
     app.mount("/static", StaticFiles(directory=_PACKAGE_FOLDER / "static"), name="static")
     app.include_router(sign_in_routes.router)
     app.include_router(account_routes.router)
@@ -93,6 +103,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.include_router(bot_forms.router)
     app.include_router(ladder_forms.router)
     app.include_router(machine_forms.router)
+    app.include_router(login_requests.router)
     app.include_router(pages.router)
 
     @app.exception_handler(StarletteHTTPException)

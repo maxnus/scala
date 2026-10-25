@@ -35,7 +35,8 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
    command, as NachOS ships as `sc2nachos`. Bots talk to the engine through the ladder's command line (`--GamePort`,
    `--StartPort`, `--LadderServer`, `--OpponentId`), so a bot on any library plays.
 7. **People sign in with GitHub** (the owner, 2026-10-24, for step 3). The server keeps no passwords; the CLI and the
-   runners act for a user with tokens made on the account page and kept as hashes. A dev sign-in by any name serves
+   runners act for a user with tokens kept as hashes: made on the account page, or by `sc2scala login`, which makes
+   its token itself and has the user confirm its code in the browser (step 6c). A dev sign-in by any name serves
    tests and a server on one's own machine, and is refused unless the server listens on a local address.
 8. **The server renders its pages**, with no JavaScript build, and people do in them everything but run a runner
    (the owner, 2026-10-24, reversing step 3's pages that only showed): a bot's author needs no install. The CLI does
@@ -210,7 +211,8 @@ Each step ends in something that runs, and is a pull request of its own.
      resuming and withdrawing bots. A zip of the bot's folder itself is read as that folder.
    - 6b, done: ladders and runners, for their owners: making a ladder and changing its password, limits and maps; a
      ladder's runners, and barring them; and which ladders one's machines serve, and removing one.
-   - 6c: `sc2scala login` signed in through the browser, and the README begun in the browser.
+   - 6c, done: `sc2scala login` signed in through the browser, by a code the user confirms, and the README begun in
+     the browser.
 7. **The first public server**, on the owner's VPS. Its reverse proxy limits a request's body, since the app receives an
    upload whole before it checks who sent it.
 

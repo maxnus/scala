@@ -8,8 +8,8 @@
       <h2>Your new token, {{ new_token_name }}</h2>
       <p>Copy it now: this page shows it once, and the server keeps only its hash.</p>
       <pre>{{ new_token }}</pre>
-      <p>Sign the <code>sc2scala</code> command in with it:</p>
-      <pre>sc2scala login {{ request.app.state.config.public_url }}</pre>
+      <p>Sign the <code>sc2scala</code> command in with it, where no browser is at hand:</p>
+      <pre>sc2scala login {{ request.app.state.config.public_url }} --token {{ new_token }}</pre>
     </section>
   {% endif %}
   <h2>Your bots</h2>
@@ -74,7 +74,10 @@
     <p class="muted">None yet: make this computer one with <code>sc2scala runner register NAME</code>.</p>
   {% endif %}
   <h2>Tokens</h2>
-  <p>A token lets the <code>sc2scala</code> command and your runners act for you. Delete one you no longer use.</p>
+  <p>
+    A token lets the <code>sc2scala</code> command and your runners act for you. <code>sc2scala login</code> makes one
+    when you confirm its code here; make one yourself for a machine with no browser. Delete one you no longer use.
+  </p>
   {% if user.api_tokens %}
     <table>
       <thead><tr><th>Name</th><th>Made</th><th>Last used</th><th></th></tr></thead>

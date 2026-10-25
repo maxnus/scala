@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign a command in · Scala{% endblock %}
+{% block main %}
+  <h1>Sign a command in</h1>
+  {% if login %}
+    <p>
+      A command that calls itself “{{ login.name }}”{% if login.from_address %}, from {{ login.from_address }},{% endif %}
+      asks to act for you, {{ user.login }}, on this server: to upload bots, enter them, and register runners.
+    </p>
+    <p class="code-to-compare">{{ login.code }}</p>
+    <p>Confirm only if your terminal shows this same code. If you did not run <code>sc2scala login</code> just now, refuse.</p>
+    <form method="post" action="/login" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="code" value="{{ login.code }}">
+      <button type="submit" name="answer" value="confirm">Sign it in</button>
+      <button type="submit" name="answer" value="refuse" class="secondary">Refuse</button>
+    </form>
+    <p class="note">Its token is then listed on <a href="/account">your page</a> with your others, where you may delete it.</p>
+  {% else %}
+    {% if code %}<p class="notice refused" role="alert">No command waits with the code {{ code }}: it expired, or was answered already.</p>{% endif %}
+    <p>Type the code your terminal shows, after <code>sc2scala login</code>.</p>
+    <form method="get" action="/login" class="row">
+      <label>Code <input name="code" required maxlength="9" autocomplete="off" placeholder="ABCD-2345"></label>
+      <button type="submit">Next</button>
+    </form>
+  {% endif %}
+{% endblock %}

@@ -3,12 +3,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.race import Race
 from sc2scala.server.api_tokens import hash_of_token, new_token
 from sc2scala.server.bots_api import bots_of
-from sc2scala.server.models import ApiToken, RunnerMachine, User
+from sc2scala.server.ladder_runners_api import barred_from
+from sc2scala.server.ladders_api import is_member
+from sc2scala.server.models import ApiToken, Ladder, RunnerMachine, User
 from sc2scala.server.web import DatabaseSession, check_csrf, render, required_user
 
 router = APIRouter()
@@ -59,7 +61,22 @@ def delete_token(
 
 def _render_account(request: Request, session: Session, user: User, **context: Any) -> HTMLResponse:
     bots = bots_of(session, user)
-    machines = session.scalars(
-        select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name)
+    machines = list(
+        session.scalars(select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name))
     )
-    return render(request, "account.html", user=user, bots=bots, machines=list(machines), races=list(Race), **context)
+    servable_ladders = [
+        ladder
+        for ladder in session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
+        if not ladder.is_protected or is_member(ladder, user)
+    ]
+    return render(
+        request,
+        "account.html",
+        user=user,
+        bots=bots,
+        machines=machines,
+        barred_from={machine.id: barred_from(session, machine) for machine in machines},
+        servable_ladders=servable_ladders,
+        races=list(Race),
+        **context,
+    )

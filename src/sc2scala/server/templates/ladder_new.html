@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_forms.html" import limit_inputs %}
+{% block title %}A new ladder · Scala{% endblock %}
+{% block main %}
+  <h1>A new ladder</h1>
+  {% set kept = notice.kept if notice and notice.kept else {} %}
+  <form method="post" action="/ladders/new" enctype="multipart/form-data" class="stacked">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name <input name="name" required maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9\-]*" value="{{ kept.get('name', '') }}"></label>
+    <p class="note">Letters, digits and '-', 40 at most.</p>
+    <label>Maps <input type="file" name="maps" accept=".SC2Map" multiple required></label>
+    <p class="note">One <code>.SC2Map</code> file or more; each match is played on one of them, drawn at random.</p>
+    <label>Password <input type="password" name="password" autocomplete="new-password"></label>
+    <p class="note">Leave it empty for a public ladder. With one, only those who give it see the ladder and enter it.</p>
+    <details>
+      <summary>Limits</summary>
+      <p class="note">Filled in with the defaults, those of AI Arena's local setup.</p>
+      {{ limit_inputs(limit_groups, limits, kept) }}
+    </details>
+    <button type="submit">Make the ladder</button>
+  </form>
+{% endblock %}

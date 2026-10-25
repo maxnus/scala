@@ -19,7 +19,14 @@ from sc2scala.server.ladders_api import (
     withdraw_from_ladder,
 )
 from sc2scala.server.models import User
-from sc2scala.server.web import DatabaseSession, check_csrf, local_path_or, redirect_with_notice, required_user
+from sc2scala.server.web import (
+    DatabaseSession,
+    check_csrf,
+    local_path_or,
+    redirect_with_notice,
+    refusal_reason,
+    required_user,
+)
 
 router = APIRouter()
 
@@ -30,10 +37,11 @@ NextPage = Annotated[str, Form()]
 
 @router.post("/bots")
 def new_bot(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
-    name: Annotated[str, Form()],
+    name: Annotated[str, Form()] = "",
     race: Annotated[str, Form()],
     archive: UploadFile,
     csrf_token: CsrfToken,
@@ -54,13 +62,14 @@ def new_bot(
         bot, version, _ = upload_bot_version(request, session, user, name, archive.file, race=race)
     except (HTTPException, UploadRefusedError) as error:
         return redirect_with_notice(
-            request, "/account", _reason(error), refused=True, kept={"name": name, "race": race}
+            request, "/account", refusal_reason(error), refused=True, kept={"name": name, "race": race}
         )
     return redirect_with_notice(request, f"/bots/{bot.name}", f"Uploaded {bot.name}, version {version.number}")
 
 
 @router.post("/bots/{name}/versions")
 def new_version(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
@@ -74,7 +83,7 @@ def new_version(
     try:
         bot, version, is_new = upload_bot_version(request, session, user, name, archive.file, race=race or None)
     except (HTTPException, UploadRefusedError) as error:
-        return redirect_with_notice(request, f"/bots/{name}", _reason(error), refused=True)
+        return redirect_with_notice(request, f"/bots/{name}", refusal_reason(error), refused=True)
     message = (
         f"Uploaded version {version.number}"
         if is_new
@@ -85,11 +94,12 @@ def new_version(
 
 @router.post("/bots/{name}/entries")
 def enter_from_bot_page(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
     name: str,
-    ladder: Annotated[str, Form()],
+    ladder: Annotated[str, Form()] = "",
     csrf_token: CsrfToken,
 ) -> RedirectResponse:
     """Enters the user's bot in a ladder, from the bot's page."""
@@ -97,17 +107,18 @@ def enter_from_bot_page(
     try:
         entered_in = enter_in_ladder(session, user, ladder, name)
     except HTTPException as error:
-        return redirect_with_notice(request, f"/bots/{name}", _reason(error), refused=True)
+        return redirect_with_notice(request, f"/bots/{name}", refusal_reason(error), refused=True)
     return redirect_with_notice(request, f"/bots/{name}", f"Entered {name} in {entered_in.name}")
 
 
 @router.post("/ladders/{name}/join")
 def join(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
     name: str,
-    password: Annotated[str, Form()],
+    password: Annotated[str, Form()] = "",
     csrf_token: CsrfToken,
 ) -> RedirectResponse:
     """Makes the user a member of a protected ladder, given its password, from the ladder's page."""
@@ -115,17 +126,18 @@ def join(
     try:
         ladder = join_with_password(session, user, name, password)
     except HTTPException as error:
-        return redirect_with_notice(request, f"/ladders/{name}", _reason(error), refused=True)
+        return redirect_with_notice(request, f"/ladders/{name}", refusal_reason(error), refused=True)
     return redirect_with_notice(request, f"/ladders/{ladder.name}", f"You are a member of {ladder.name}")
 
 
 @router.post("/ladders/{name}/entries")
 def enter_bot(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
     name: str,
-    bot: Annotated[str, Form()],
+    bot: Annotated[str, Form()] = "",
     csrf_token: CsrfToken,
     next_page: NextPage = "",
 ) -> RedirectResponse:
@@ -135,12 +147,13 @@ def enter_bot(
     try:
         ladder = enter_in_ladder(session, user, name, bot)
     except HTTPException as error:
-        return redirect_with_notice(request, back, _reason(error), refused=True)
+        return redirect_with_notice(request, back, refusal_reason(error), refused=True)
     return redirect_with_notice(request, back, f"Entered {bot} in {ladder.name}")
 
 
 @router.post("/ladders/{name}/entries/{bot_name}/withdraw")
 def withdraw_bot(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
@@ -155,12 +168,13 @@ def withdraw_bot(
     try:
         ladder = withdraw_from_ladder(session, user, name, bot_name)
     except HTTPException as error:
-        return redirect_with_notice(request, back, _reason(error), refused=True)
+        return redirect_with_notice(request, back, refusal_reason(error), refused=True)
     return redirect_with_notice(request, back, f"Took {bot_name} out of {ladder.name}")
 
 
 @router.post("/ladders/{name}/entries/{bot_name}/pause")
 def pause_entry(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
@@ -175,12 +189,13 @@ def pause_entry(
     try:
         entry = pause_in_ladder(session, user, name, bot_name)
     except HTTPException as error:
-        return redirect_with_notice(request, back, _reason(error), refused=True)
+        return redirect_with_notice(request, back, refusal_reason(error), refused=True)
     return redirect_with_notice(request, back, f"Paused {entry.bot.name} in {entry.ladder.name}")
 
 
 @router.post("/ladders/{name}/entries/{bot_name}/resume")
 def resume_entry(
+    *,
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
@@ -195,9 +210,5 @@ def resume_entry(
     try:
         entry = resume_in_ladder(session, user, name, bot_name)
     except HTTPException as error:
-        return redirect_with_notice(request, back, _reason(error), refused=True)
+        return redirect_with_notice(request, back, refusal_reason(error), refused=True)
     return redirect_with_notice(request, back, f"{entry.bot.name} plays in {entry.ladder.name} again")
-
-
-def _reason(error: HTTPException | UploadRefusedError) -> str:
-    return str(error.detail) if isinstance(error, HTTPException) else str(error)

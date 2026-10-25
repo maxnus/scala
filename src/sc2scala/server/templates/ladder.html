@@ -6,7 +6,9 @@
   <p class="muted">
     By {{ ladder.owner.login }}{% if ladder.is_protected %}, protected{% endif %} ·
     {{ ladder.maps | length }} maps: {% for map_file in ladder.maps %}{{ map_file.name }}{% if not loop.last %}, {% endif %}{% endfor %} ·
-    <a href="/ladders/{{ ladder.name }}/pairs">pairs</a> · <a href="/ladders/{{ ladder.name }}/matches">all matches</a>
+    <a href="/ladders/{{ ladder.name }}/pairs">pairs</a> · <a href="/ladders/{{ ladder.name }}/matches">all matches</a> ·
+    <a href="/ladders/{{ ladder.name }}/runners">runners</a>{% if user and user.id == ladder.owner_id %} ·
+    <a href="/ladders/{{ ladder.name }}/settings">settings</a>{% endif %}
   </p>
   <h2>Standings</h2>
   {% if standings %}

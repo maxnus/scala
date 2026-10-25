@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_forms.html" import limit_inputs %}
+{% block title %}{{ ladder.name }}'s settings · Scala{% endblock %}
+{% block main %}
+  <h1><a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>'s settings</h1>
+  <h2>Password</h2>
+  <p>
+    {% if ladder.is_protected %}Protected: its members alone see it and enter it.{% else %}Public: anyone sees it, and anyone signed in enters it.{% endif %}
+    Whoever joined with an earlier password stays a member.
+  </p>
+  <form method="post" action="/ladders/{{ ladder.name }}/password" class="row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>{{ "New password" if ladder.is_protected else "Password" }} <input type="password" name="new_password" required autocomplete="new-password"></label>
+    <button type="submit">{{ "Change the password" if ladder.is_protected else "Protect it" }}</button>
+  </form>
+  {% if ladder.is_protected %}
+    <form method="post" action="/ladders/{{ ladder.name }}/password/remove" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary">Remove the password</button>
+    </form>
+  {% endif %}
+  <h2>Maps</h2>
+  <table>
+    <tbody>
+      {% for map_file in ladder.maps %}
+        <tr>
+          <td>{{ map_file.name }}</td>
+          <td class="actions">
+            {% if ladder.maps | length > 1 %}
+              <form method="post" action="/ladders/{{ ladder.name }}/maps/{{ map_file.name | urlencode }}/remove" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="link">Take it out</button>
+              </form>
+            {% else %}
+              <span class="muted">its last map</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/ladders/{{ ladder.name }}/maps" enctype="multipart/form-data" class="row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Maps <input type="file" name="maps" accept=".SC2Map" multiple required></label>
+    <button type="submit">Add them</button>
+  </form>
+  <h2>Limits</h2>
+  <p class="note">The next matches take the limits as changed; the matches being played keep theirs.</p>
+  <form method="post" action="/ladders/{{ ladder.name }}/limits" class="stacked">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ limit_inputs(limit_groups, limits, {}) }}
+    <button type="submit">Change the limits</button>
+  </form>
+  <h2>Runners</h2>
+  <p><a href="/ladders/{{ ladder.name }}/runners">The runner machines that played its matches</a>, where you may bar one.</p>
+{% endblock %}

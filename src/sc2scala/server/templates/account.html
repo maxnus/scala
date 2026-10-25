@@ -46,7 +46,25 @@
         {% for machine in machines %}
           <tr>
             <td>{{ machine.name }}</td>
-            <td>{% if machine.serves_public %}every public ladder{% if machine.ladders %}, and {% endif %}{% endif %}{% for ladder in machine.ladders %}<a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if not machine.serves_public and not machine.ladders %}no ladder{% endif %}</td>
+            <td>
+              {% if machine.serves_public %}every public ladder{% if machine.ladders %}, and {% endif %}{% endif %}{% for ladder in machine.ladders %}<a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if not machine.serves_public and not machine.ladders %}no ladder{% endif %}{% if barred_from[machine.id] %}; barred from {{ barred_from[machine.id] | join(", ") }}{% endif %}
+              <details class="machine">
+                <summary>Change…</summary>
+                <form method="post" action="/account/machines/{{ machine.name }}" class="stacked">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <label><input type="checkbox" name="serves_public" value="true"{% if machine.serves_public %} checked{% endif %}> every public ladder</label>
+                  {% for ladder in servable_ladders %}
+                    <label><input type="checkbox" name="ladders" value="{{ ladder.name }}"{% if ladder in machine.ladders %} checked{% endif %}> {{ ladder.name }}{% if ladder.is_protected %} <span class="muted">(protected)</span>{% endif %}</label>
+                  {% endfor %}
+                  <button type="submit">Serve these</button>
+                </form>
+                <form method="post" action="/account/machines/{{ machine.name }}/remove" class="row">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="secondary">Remove {{ machine.name }}</button>
+                  <span class="note">Its token stops working, and the matches it is playing are void.</span>
+                </form>
+              </details>
+            </td>
             <td class="muted">{{ machine.last_seen_at | when if machine.last_seen_at else "never" }}</td>
           </tr>
         {% endfor %}

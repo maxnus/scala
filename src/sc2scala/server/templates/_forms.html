@@ -32,3 +32,18 @@
     itself, or the files in it, both work.
   </p>
 {% endmacro %}
+
+{% macro limit_inputs(limit_groups, limits, kept) %}
+  {% for group_name, group in limit_groups %}
+    <fieldset class="limits">
+      <legend>{{ group_name }}</legend>
+      {% for field in group %}
+        <label>
+          <span>{{ field.label }}</span>
+          <input type="number" name="{{ field.name }}" value="{{ kept.get(field.name, limits[field.name]) }}" required
+                 min="0" step="{{ 'any' if field.fractional else 1 }}" inputmode="{{ 'decimal' if field.fractional else 'numeric' }}">
+        </label>
+      {% endfor %}
+    </fieldset>
+  {% endfor %}
+{% endmacro %}

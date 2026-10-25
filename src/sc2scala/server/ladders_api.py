@@ -23,6 +23,8 @@ router = APIRouter(prefix="/api/ladders")
 
 MAP_FILES = "maps"
 _LADDER_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,39}")
+_NAMES_OF_PAGES = frozenset({"new"})
+"""Names a ladder may not take, since `/ladders/<name>` is a page of its own."""
 _MEBIBYTE = 1024 * 1024
 
 TokenUser = Annotated[User, Depends(token_user)]
@@ -54,13 +56,35 @@ def create_ladder(
 ) -> dict[str, Any]:
     """Makes a ladder of the maps uploaded, protected by `password` if given, with `limits`, a JSON object, changed
     from the defaults."""
+    ladder = make_ladder(request, session, user, name, maps, password=password, limit_changes=_json_object(limits))
+    return ladder_details(ladder, user)
+
+
+def make_ladder(
+    request: Request,
+    session: Session,
+    user: User,
+    name: str,
+    maps: list[UploadFile],
+    *,
+    password: str | None,
+    limit_changes: dict[str, Any],
+) -> Ladder:
+    """Makes the user's ladder of `maps`, protected by `password` if given, with the defaults' limits but for
+    `limit_changes`.
+
+    Raises `HTTPException` for a name that is no ladder's, is taken or is kept for a page, or for no map; and
+    `UploadRefusedError` for a limit or a map that does not fit.
+    """
     if not _LADDER_NAME_PATTERN.fullmatch(name):
         raise HTTPException(422, f"A ladder's name is letters, digits and '-', 40 at most, not {name!r}")
+    if name.lower() in _NAMES_OF_PAGES:
+        raise HTTPException(422, f"{name!r} names the page that makes ladders; choose another name")
     if ladder_named(session, name) is not None:
         raise HTTPException(409, f"A ladder is named {name} already")
     if not maps:
         raise HTTPException(422, "A ladder needs a map")
-    game_limits, resource_limits = limits_changed(_json_object(limits), game_limits={}, resource_limits={})
+    game_limits, resource_limits = limits_changed(limit_changes, game_limits={}, resource_limits={})
     ladder = Ladder(
         name=name,
         owner_id=user.id,
@@ -73,7 +97,7 @@ def create_ladder(
     for upload in maps:
         _add_map(request, session, ladder, upload, uploader=user)
     commit_or_conflict(session, f"Another ladder named {name} was made at the same moment")
-    return ladder_details(ladder, user)
+    return ladder
 
 
 @router.get("")
@@ -103,17 +127,14 @@ def change_ladder(session: DatabaseSession, user: TokenUser, name: str, changes:
 
     Whoever joined with an earlier password stays a member.
     """
-    ladder = owned_ladder(session, name, user)
-    if changes.new_password and changes.remove_password:
-        raise HTTPException(422, "Set a password or remove it, not both")
-    if changes.new_password:
-        ladder.password_hash = hash_of_password(changes.new_password)
-    if changes.remove_password:
-        ladder.password_hash = None
-    ladder.game_limits, ladder.resource_limits = limits_changed(
-        changes.limits, game_limits=ladder.game_limits, resource_limits=ladder.resource_limits
+    ladder = change_ladder_settings(
+        session,
+        user,
+        name,
+        new_password=changes.new_password,
+        remove_password=changes.remove_password,
+        limit_changes=changes.limits,
     )
-    session.commit()
     return ladder_details(ladder, user)
 
 
@@ -121,14 +142,54 @@ def change_ladder(session: DatabaseSession, user: TokenUser, name: str, changes:
 def add_map(
     request: Request, session: DatabaseSession, user: TokenUser, name: str, map_file: UploadFile
 ) -> dict[str, Any]:
-    ladder = owned_ladder(session, name, user)
-    _add_map(request, session, ladder, map_file, uploader=user)
-    session.commit()
-    return ladder_details(ladder, user)
+    return ladder_details(add_maps(request, session, user, name, [map_file]), user)
 
 
 @router.delete("/{name}/maps/{map_name}")
 def remove_map(session: DatabaseSession, user: TokenUser, name: str, map_name: str) -> dict[str, Any]:
+    return ladder_details(remove_map_named(session, user, name, map_name), user)
+
+
+def change_ladder_settings(
+    session: Session,
+    user: User,
+    name: str,
+    *,
+    new_password: str | None = None,
+    remove_password: bool = False,
+    limit_changes: dict[str, Any] | None = None,
+) -> Ladder:
+    """Sets or removes the owner's ladder's password, and changes its limits, which the next matches take.
+
+    Raises `HTTPException` for another's ladder, or for setting and removing the password at once, and
+    `LimitRefusedError` for a limit that does not fit. Whoever joined with an earlier password stays a member.
+    """
+    ladder = owned_ladder(session, name, user)
+    if new_password and remove_password:
+        raise HTTPException(422, "Set a password or remove it, not both")
+    if new_password:
+        ladder.password_hash = hash_of_password(new_password)
+    if remove_password:
+        ladder.password_hash = None
+    ladder.game_limits, ladder.resource_limits = limits_changed(
+        limit_changes or {}, game_limits=ladder.game_limits, resource_limits=ladder.resource_limits
+    )
+    session.commit()
+    return ladder
+
+
+def add_maps(request: Request, session: Session, user: User, name: str, uploads: list[UploadFile]) -> Ladder:
+    """Adds the uploaded maps to the owner's ladder, none if one is refused: `HTTPException` for another's ladder or a
+    map of a name it holds another of, `UploadRefusedError` for a file that is no map."""
+    ladder = owned_ladder(session, name, user)
+    for upload in uploads:
+        _add_map(request, session, ladder, upload, uploader=user)
+    session.commit()
+    return ladder
+
+
+def remove_map_named(session: Session, user: User, name: str, map_name: str) -> Ladder:
+    """Takes a map out of the owner's ladder; 404 if it holds none of that name, 409 for its last."""
     ladder = owned_ladder(session, name, user)
     held = next((map_file for map_file in ladder.maps if map_file.name == map_name), None)
     if held is None:
@@ -137,7 +198,7 @@ def remove_map(session: DatabaseSession, user: TokenUser, name: str, map_name: s
         raise HTTPException(409, f"{map_name} is {ladder.name}'s last map")
     ladder.maps.remove(held)
     session.commit()
-    return ladder_details(ladder, user)
+    return ladder
 
 
 @router.post("/{name}/join")

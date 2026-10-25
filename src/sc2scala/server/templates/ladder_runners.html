@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ ladder.name }}'s runners · Scala{% endblock %}
+{% block main %}
+  <h1><a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>'s runners</h1>
+  <p class="note">
+    The runner machines that played its matches, as <em>owner/machine</em>. {% if is_owner %}As its owner, you may bar
+    one: it then plays none of its matches, those it is playing are void, and so are the results it reported here,
+    unless you keep them, as for a runner barred for being slow rather than dishonest. The ratings are then fitted
+    again without them. Lifting a bar lets it play again; what the bar voided stays void.{% endif %}
+  </p>
+  {% if runners %}
+    <div class="scrolls">
+    <table>
+      <thead>
+        <tr>
+          <th>Runner</th><th class="number">Finished</th><th class="number">Void</th><th class="number">Being played</th>
+          <th>Last drawn</th><th>Bar</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in runners %}
+          <tr>
+            <td>{{ record.runner }}</td>
+            <td class="number">{{ record.finished }}</td>
+            <td class="number">{{ record.void }}</td>
+            <td class="number">{{ record.being_played }}</td>
+            <td class="when muted">{{ record.last_drawn_at | when if record.last_drawn_at else "" }}</td>
+            <td class="actions">
+              {% if record.bar %}
+                barred {{ record.bar.barred_at | when }}, its results {{ "void" if record.bar.results_voided else "kept" }}
+                {% if is_owner %}
+                  {% set owner, machine = record.owner_and_machine %}
+                  <form method="post" action="/ladders/{{ ladder.name }}/runners/{{ owner }}/{{ machine }}/unbar" class="inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="link">Lift the bar</button>
+                  </form>
+                {% endif %}
+              {% elif is_owner %}
+                <details>
+                  <summary>Bar it…</summary>
+                  <form method="post" action="/ladders/{{ ladder.name }}/runners/bar" class="row">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="runner" value="{{ record.runner }}">
+                    <label><input type="checkbox" name="keep_results" value="true"> keep its results</label>
+                    <button type="submit">Bar {{ record.runner }}</button>
+                  </form>
+                </details>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="muted">No runner has played its matches yet.</p>
+  {% endif %}
+{% endblock %}

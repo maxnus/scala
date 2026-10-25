@@ -17,6 +17,7 @@ from sc2scala.server.ladder_ratings import (
     rating_of_latest_version,
     standings,
 )
+from sc2scala.server.ladder_runners_api import runners_of
 from sc2scala.server.ladders_api import is_member, ladder_named, may_enter, may_withdraw, visible_ladder
 from sc2scala.server.match_draw import LEASED, VOID
 from sc2scala.server.matches_api import (
@@ -94,6 +95,20 @@ def ladder_matches_page(
     earlier = matches[-1].id if len(matches) == _MATCHES_PER_PAGE else None
     return render(
         request, "ladder_matches.html", user=user, ladder=ladder, matches=_shown_matches(matches), earlier=earlier
+    )
+
+
+@router.get("/ladders/{name}/runners", response_class=HTMLResponse)
+def runners_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
+    """The runner machines that played the ladder's matches, and those its owner barred, with forms to bar them."""
+    ladder = visible_ladder(session, name, user)
+    return render(
+        request,
+        "ladder_runners.html",
+        user=user,
+        ladder=ladder,
+        runners=runners_of(session, ladder),
+        is_owner=user is not None and ladder.owner_id == user.id,
     )
 
 

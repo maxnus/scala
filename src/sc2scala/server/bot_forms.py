@@ -10,8 +10,14 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 
 from sc2scala.errors import UploadRefusedError
-from sc2scala.server.bots_api import upload_bot_version
-from sc2scala.server.ladders_api import enter, join_with_password, pause, resume, withdraw
+from sc2scala.server.bots_api import bot_named, upload_bot_version
+from sc2scala.server.ladders_api import (
+    enter_in_ladder,
+    join_with_password,
+    pause_in_ladder,
+    resume_in_ladder,
+    withdraw_from_ladder,
+)
 from sc2scala.server.models import User
 from sc2scala.server.web import DatabaseSession, check_csrf, local_path_or, redirect_with_notice, required_user
 
@@ -35,6 +41,15 @@ def new_bot(
     """Uploads the first version of a bot of the user's, from the account page."""
     check_csrf(request, csrf_token)
     name = name.strip()
+    existing = bot_named(session, name)
+    if existing is not None and existing.owner_id == user.id:
+        return redirect_with_notice(
+            request,
+            "/account",
+            f"You have a bot named {existing.name} already: upload its next version on its page",
+            refused=True,
+            kept={"name": name, "race": race},
+        )
     try:
         bot, version, _ = upload_bot_version(request, session, user, name, archive.file, race=race)
     except (HTTPException, UploadRefusedError) as error:
@@ -69,7 +84,7 @@ def new_version(
 
 
 @router.post("/bots/{name}/entries")
-def enter_in_ladder(
+def enter_from_bot_page(
     request: Request,
     session: DatabaseSession,
     user: SignedInUser,
@@ -80,7 +95,7 @@ def enter_in_ladder(
     """Enters the user's bot in a ladder, from the bot's page."""
     check_csrf(request, csrf_token)
     try:
-        entered_in = enter(session, user, ladder, name)
+        entered_in = enter_in_ladder(session, user, ladder, name)
     except HTTPException as error:
         return redirect_with_notice(request, f"/bots/{name}", _reason(error), refused=True)
     return redirect_with_notice(request, f"/bots/{name}", f"Entered {name} in {entered_in.name}")
@@ -118,7 +133,7 @@ def enter_bot(
     check_csrf(request, csrf_token)
     back = local_path_or(next_page, f"/ladders/{name}")
     try:
-        ladder = enter(session, user, name, bot)
+        ladder = enter_in_ladder(session, user, name, bot)
     except HTTPException as error:
         return redirect_with_notice(request, back, _reason(error), refused=True)
     return redirect_with_notice(request, back, f"Entered {bot} in {ladder.name}")
@@ -138,7 +153,7 @@ def withdraw_bot(
     check_csrf(request, csrf_token)
     back = local_path_or(next_page, f"/ladders/{name}")
     try:
-        ladder = withdraw(session, user, name, bot_name)
+        ladder = withdraw_from_ladder(session, user, name, bot_name)
     except HTTPException as error:
         return redirect_with_notice(request, back, _reason(error), refused=True)
     return redirect_with_notice(request, back, f"Took {bot_name} out of {ladder.name}")
@@ -158,7 +173,7 @@ def pause_entry(
     check_csrf(request, csrf_token)
     back = local_path_or(next_page, f"/ladders/{name}")
     try:
-        entry = pause(session, user, name, bot_name)
+        entry = pause_in_ladder(session, user, name, bot_name)
     except HTTPException as error:
         return redirect_with_notice(request, back, _reason(error), refused=True)
     return redirect_with_notice(request, back, f"Paused {entry.bot.name} in {entry.ladder.name}")
@@ -178,7 +193,7 @@ def resume_entry(
     check_csrf(request, csrf_token)
     back = local_path_or(next_page, f"/ladders/{name}")
     try:
-        entry = resume(session, user, name, bot_name)
+        entry = resume_in_ladder(session, user, name, bot_name)
     except HTTPException as error:
         return redirect_with_notice(request, back, _reason(error), refused=True)
     return redirect_with_notice(request, back, f"{entry.bot.name} plays in {entry.ladder.name} again")

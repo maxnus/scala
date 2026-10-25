@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.race import Race
 from sc2scala.result_code import ResultCode
-from sc2scala.server.bots_api import bot_named
+from sc2scala.server.bots_api import bot_named, bots_of
 from sc2scala.server.ladder_ratings import (
     INTERVAL_WIDTH,
     PRIOR_SD,
@@ -27,7 +27,7 @@ from sc2scala.server.matches_api import (
     replay_of,
     visible_match,
 )
-from sc2scala.server.models import BotRecord, Ladder, LadderEntry, MatchRecord, User
+from sc2scala.server.models import Ladder, LadderEntry, MatchRecord, User
 from sc2scala.server.web import DatabaseSession, render, signed_in_user
 
 router = APIRouter()
@@ -68,7 +68,7 @@ def ladder_page(request: Request, session: DatabaseSession, user: SignedInUser, 
     if ladder.is_protected and not is_member(ladder, user):
         return render(request, "ladder_join.html", user=user, ladder=ladder, status_code=403)
     entered = {entry.bot_id for entry in ladder.entries}
-    own_bots = _bots_of(session, user)
+    own_bots = bots_of(session, user)
     return render(
         request,
         "ladder.html",
@@ -136,10 +136,9 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
     bot_entries = list(
         session.scalars(select(LadderEntry).join(Ladder).where(LadderEntry.bot_id == bot.id).order_by(Ladder.name))
     )
-    entries = bot_entries
     ladders = [
         {"ladder": entry.ladder, "entry": entry, "standing": rating_of_latest_version(session, entry.ladder, entry)}
-        for entry in entries
+        for entry in bot_entries
         if not entry.ladder.is_protected or is_member(entry.ladder, user)
     ]
     visible_ids = [entry["ladder"].id for entry in ladders]
@@ -158,7 +157,7 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
     enterable_ladders = (
         [
             ladder
-            for ladder in session.scalars(select(Ladder).order_by(Ladder.name))
+            for ladder in session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
             if ladder.id not in entered_ladders and may_enter(ladder, user)
         ]
         if is_author and bot.latest_version
@@ -175,12 +174,6 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
         enterable_ladders=enterable_ladders,
         races=list(Race),
     )
-
-
-def _bots_of(session: Session, user: User | None) -> list[BotRecord]:
-    if user is None:
-        return []
-    return list(session.scalars(select(BotRecord).where(BotRecord.owner_id == user.id).order_by(BotRecord.name)))
 
 
 def outcome_of(record: MatchRecord) -> str:

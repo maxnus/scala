@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from sc2scala.race import Race
 from sc2scala.server.api_tokens import hash_of_token, new_token
-from sc2scala.server.models import ApiToken, BotRecord, RunnerMachine, User
+from sc2scala.server.bots_api import bots_of
+from sc2scala.server.models import ApiToken, RunnerMachine, User
 from sc2scala.server.web import DatabaseSession, check_csrf, render, required_user
 
 router = APIRouter()
@@ -57,10 +58,8 @@ def delete_token(
 
 
 def _render_account(request: Request, session: Session, user: User, **context: Any) -> HTMLResponse:
-    bots = session.scalars(select(BotRecord).where(BotRecord.owner_id == user.id).order_by(BotRecord.name))
+    bots = bots_of(session, user)
     machines = session.scalars(
         select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name)
     )
-    return render(
-        request, "account.html", user=user, bots=list(bots), machines=list(machines), races=list(Race), **context
-    )
+    return render(request, "account.html", user=user, bots=bots, machines=list(machines), races=list(Race), **context)

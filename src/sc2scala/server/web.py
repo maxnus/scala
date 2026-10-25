@@ -18,6 +18,8 @@ from sc2scala.server.models import ApiToken, RunnerMachine, User, utc_now
 
 _CSRF_SESSION_KEY = "csrf_token"
 _NOTICE_SESSION_KEY = "notice"
+_LONGEST_NOTICE = 300
+"""The most characters a notice keeps, of a message or of a field kept, so that the session's cookie stays small."""
 _USER_SESSION_KEY = "user_id"
 _LAST_USE_PRECISION = timedelta(minutes=1)
 """How stale a token's time of last use may grow before a request brings it up to date."""
@@ -141,7 +143,7 @@ def render(
         {
             "user": user,
             "csrf_token": csrf_token(request),
-            "notice": request.session.pop(_NOTICE_SESSION_KEY, None),
+            "notice": _notice_for(request),
             **context,
         },
         status_code=status_code,
@@ -152,6 +154,23 @@ def redirect_with_notice(
     request: Request, path: str, message: str, *, refused: bool = False, kept: dict[str, str] | None = None
 ) -> RedirectResponse:
     """Sends the browser to `path`, whose page then shows `message` once: what a form did, or why it was `refused`,
-    with what it held that the page fills in again, `kept`."""
-    request.session[_NOTICE_SESSION_KEY] = {"message": message, "refused": refused, "kept": kept or {}}
+    with what it held that the page fills in again, `kept`; each cut to 300 characters."""
+    request.session[_NOTICE_SESSION_KEY] = {
+        "path": path,
+        "message": _shortened(message),
+        "refused": refused,
+        "kept": {name: _shortened(value) for name, value in (kept or {}).items()},
+    }
     return RedirectResponse(path, status_code=303)
+
+
+def _notice_for(request: Request) -> dict[str, Any] | None:
+    """The notice a form left for this page, which it takes, so that no other page, in another tab say, shows it."""
+    notice = request.session.get(_NOTICE_SESSION_KEY)
+    if notice is None or notice.get("path") != request.url.path:
+        return None
+    return request.session.pop(_NOTICE_SESSION_KEY)
+
+
+def _shortened(text: str) -> str:
+    return text if len(text) <= _LONGEST_NOTICE else f"{text[: _LONGEST_NOTICE - 1]}…"

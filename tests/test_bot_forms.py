@@ -155,3 +155,32 @@ def test_a_form_comes_back_only_to_a_page_of_this_server(ladder: LadderWithBots)
         follow_redirects=False,
     )
     assert sent.headers["location"] == "/ladders/league"
+
+
+def test_a_long_reason_is_cut_short_so_the_session_stays_small(server: TestClient) -> None:
+    sign_in_dev(server, "alice")
+    unsafe = zip_of({"run.py": b"", "../" + "x" * 5000: b""})
+    page = submit(server, "/account", "/bots", {"name": "a_bot", "race": "T"}, files=zip_file(unsafe))
+    assert "The zip holds a path that would unpack outside" in page.text
+    assert "x" * 400 not in page.text
+    assert all(len(cookie.value or "") < 4000 for cookie in server.cookies.jar)
+
+
+def test_a_notice_shows_on_the_page_it_was_left_for_alone(server: TestClient) -> None:
+    sign_in_dev(server, "alice")
+    sent = server.post(
+        "/bots",
+        data={"name": "tab_bot", "race": "T", "csrf_token": csrf_of(server, "/account")},
+        files=zip_file(),
+        follow_redirects=False,
+    )
+    assert "Uploaded tab_bot" not in server.get("/account").text
+    assert "Uploaded tab_bot, version 1" in server.get(sent.headers["location"]).text
+
+
+def test_the_new_bot_form_makes_new_bots_alone(ladder: LadderWithBots) -> None:
+    sign_in_dev(ladder.server, "alice")
+    page = submit(ladder.server, "/account", "/bots", {"name": "Basic_Bot", "race": "Z"}, files=zip_file())
+    assert "You have a bot named basic_bot already: upload its next version on its page" in page.text
+    bot = ladder.server.get("/api/bots/basic_bot", headers=ladder.alice).json()
+    assert (bot["race"], len(bot["versions"])) == ("T", 1)

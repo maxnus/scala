@@ -149,24 +149,24 @@ def join_ladder(session: DatabaseSession, user: TokenUser, name: str, join: Join
 @router.post("/{name}/entries")
 def enter_bot(session: DatabaseSession, user: TokenUser, name: str, entry: EntryRequest) -> dict[str, Any]:
     """Enters a bot of the user's in the ladder, which then plays its latest version there."""
-    return ladder_details(enter(session, user, name, entry.bot), user)
+    return ladder_details(enter_in_ladder(session, user, name, entry.bot), user)
 
 
 @router.delete("/{name}/entries/{bot_name}")
 def withdraw_bot(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
     """Takes a bot out of the ladder, for the bot's author or the ladder's owner."""
-    return ladder_details(withdraw(session, user, name, bot_name), user)
+    return ladder_details(withdraw_from_ladder(session, user, name, bot_name), user)
 
 
 @router.post("/{name}/entries/{bot_name}/pause")
 def pause_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
-    return ladder_details(pause(session, user, name, bot_name).ladder, user)
+    return ladder_details(pause_in_ladder(session, user, name, bot_name).ladder, user)
 
 
 @router.post("/{name}/entries/{bot_name}/resume")
 def resume_entry(session: DatabaseSession, user: TokenUser, name: str, bot_name: str) -> dict[str, Any]:
     """Lets a paused entry play again, its count of failed starts begun anew."""
-    return ladder_details(resume(session, user, name, bot_name).ladder, user)
+    return ladder_details(resume_in_ladder(session, user, name, bot_name).ladder, user)
 
 
 def join_with_password(session: Session, user: User, name: str, password: str) -> Ladder:
@@ -180,7 +180,7 @@ def join_with_password(session: Session, user: User, name: str, password: str) -
     return ladder
 
 
-def enter(session: Session, user: User, name: str, bot_name: str) -> Ladder:
+def enter_in_ladder(session: Session, user: User, name: str, bot_name: str) -> Ladder:
     """Enters the user's bot in the ladder, whose member the user becomes; 403 for another's bot, 409 for a bot with no
     version or in the ladder already."""
     ladder = visible_ladder(session, name, user)
@@ -198,7 +198,7 @@ def enter(session: Session, user: User, name: str, bot_name: str) -> Ladder:
     return ladder
 
 
-def withdraw(session: Session, user: User, name: str, bot_name: str) -> Ladder:
+def withdraw_from_ladder(session: Session, user: User, name: str, bot_name: str) -> Ladder:
     """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else."""
     ladder = visible_ladder(session, name, user)
     entry = _entry_of(ladder, bot_name)
@@ -211,7 +211,7 @@ def withdraw(session: Session, user: User, name: str, bot_name: str) -> Ladder:
     return ladder
 
 
-def pause(session: Session, user: User, name: str, bot_name: str) -> LadderEntry:
+def pause_in_ladder(session: Session, user: User, name: str, bot_name: str) -> LadderEntry:
     """Pauses the author's entry; 403 for anyone else."""
     entry = _authors_entry(session, name, bot_name, user)
     entry.paused = True
@@ -220,7 +220,7 @@ def pause(session: Session, user: User, name: str, bot_name: str) -> LadderEntry
     return entry
 
 
-def resume(session: Session, user: User, name: str, bot_name: str) -> LadderEntry:
+def resume_in_ladder(session: Session, user: User, name: str, bot_name: str) -> LadderEntry:
     """Lets the author's paused entry play again, its count of failed starts begun anew; 403 for anyone else."""
     entry = _authors_entry(session, name, bot_name, user)
     entry.paused = False

@@ -211,7 +211,8 @@ Each step ends in something that runs, and is a pull request of its own.
    - 6b: ladders and runners, for their owners: making a ladder and changing it, a ladder's runners and barring them,
      and which ladders one's machines serve.
    - 6c: `sc2scala login` signed in through the browser, and the README begun in the browser.
-7. **The first public server**, on the owner's VPS.
+7. **The first public server**, on the owner's VPS. Its reverse proxy limits a request's body, since the app receives an
+   upload whole before it checks who sent it.
 
 ## Open
 

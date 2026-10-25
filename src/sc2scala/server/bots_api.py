@@ -124,6 +124,13 @@ def commit_or_conflict(session: Session, conflict: str) -> None:
         raise HTTPException(409, conflict) from error
 
 
+def bots_of(session: Session, user: User | None) -> list[BotRecord]:
+    """The user's bots, by name; none for nobody."""
+    if user is None:
+        return []
+    return list(session.scalars(select(BotRecord).where(BotRecord.owner_id == user.id).order_by(BotRecord.name)))
+
+
 def bot_named(session: Session, name: str) -> BotRecord | None:
     """The bot named `name`, in any case."""
     return session.scalar(select(BotRecord).where(func.lower(BotRecord.name) == name.lower()))

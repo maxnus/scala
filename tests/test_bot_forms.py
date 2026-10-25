@@ -20,7 +20,12 @@ def ladder(server: TestClient) -> LadderWithBots:
 
 
 def submit(
-    browser: TestClient, form_page: str, action: str, fields: dict[str, str], *, files: dict[str, Any] | None = None
+    browser: TestClient,
+    form_page: str,
+    action: str,
+    fields: dict[str, str],
+    *,
+    files: dict[str, Any] | list[tuple[str, Any]] | None = None,
 ) -> httpx.Response:
     """Sends the form at `action` as it was filled in on `form_page`, and follows its answer to the page it names."""
     sent = browser.post(

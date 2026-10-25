@@ -17,7 +17,15 @@ from sc2scala.server.ladder_ratings import (
     rating_of_latest_version,
     standings,
 )
-from sc2scala.server.ladders_api import is_member, ladder_named, may_enter, may_withdraw, visible_ladder
+from sc2scala.server.ladder_runners_api import runners_of
+from sc2scala.server.ladders_api import (
+    is_member,
+    ladder_named,
+    may_enter,
+    may_withdraw,
+    visible_ladder,
+    visible_ladders,
+)
 from sc2scala.server.match_draw import LEASED, VOID
 from sc2scala.server.matches_api import (
     logs_of,
@@ -97,6 +105,20 @@ def ladder_matches_page(
     )
 
 
+@router.get("/ladders/{name}/runners", response_class=HTMLResponse)
+def runners_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
+    """The runner machines that played the ladder's matches, and those its owner barred, with forms to bar them."""
+    ladder = visible_ladder(session, name, user)
+    return render(
+        request,
+        "ladder_runners.html",
+        user=user,
+        ladder=ladder,
+        runners=runners_of(session, ladder),
+        is_owner=user is not None and ladder.owner_id == user.id,
+    )
+
+
 @router.get("/ladders/{name}/pairs", response_class=HTMLResponse)
 def pairs_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
     ladder = visible_ladder(session, name, user)
@@ -155,11 +177,7 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
     is_author = user is not None and bot.owner_id == user.id
     entered_ladders = {entry.ladder_id for entry in bot_entries}
     enterable_ladders = (
-        [
-            ladder
-            for ladder in session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
-            if ladder.id not in entered_ladders and may_enter(ladder, user)
-        ]
+        [ladder for ladder in visible_ladders(session, user) if ladder.id not in entered_ladders]
         if is_author and bot.latest_version
         else []
     )

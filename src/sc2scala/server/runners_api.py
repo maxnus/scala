@@ -67,18 +67,33 @@ def my_machines(session: DatabaseSession, user: TokenUser) -> list[dict[str, Any
 
 @router.patch("/{name}")
 def change_machine(session: DatabaseSession, user: TokenUser, name: str, changes: MachineChanges) -> dict[str, Any]:
-    machine = _existing_machine(session, user, name)
-    if changes.serves_public is not None:
-        machine.serves_public = changes.serves_public
-    if changes.ladders is not None:
-        machine.ladders = _ladders_named(session, changes.ladders, user)
-    session.commit()
+    machine = change_machine_settings(session, user, name, serves_public=changes.serves_public, ladders=changes.ladders)
     return machine_summary(session, machine)
 
 
 @router.delete("/{name}")
 def remove_machine(session: DatabaseSession, user: TokenUser, name: str) -> dict[str, str]:
     """Removes a machine, whose token then fails, and voids the matches it was playing."""
+    remove_machine_named(session, user, name)
+    return {"removed": name}
+
+
+def change_machine_settings(
+    session: Session, user: User, name: str, *, serves_public: bool | None, ladders: list[str] | None
+) -> RunnerMachine:
+    """Changes what the user's machine serves, each setting given; 404 for no such machine, and 404 or 403 for a
+    ladder the user may not see."""
+    machine = _existing_machine(session, user, name)
+    if serves_public is not None:
+        machine.serves_public = serves_public
+    if ladders is not None:
+        machine.ladders = _ladders_named(session, ladders, user)
+    session.commit()
+    return machine
+
+
+def remove_machine_named(session: Session, user: User, name: str) -> None:
+    """Removes the user's machine, whose token then fails, and voids the matches it was playing; 404 if none."""
     machine = _existing_machine(session, user, name)
     for match in session.scalars(
         select(MatchRecord).where(MatchRecord.machine_id == machine.id, MatchRecord.status == LEASED)
@@ -88,7 +103,6 @@ def remove_machine(session: DatabaseSession, user: TokenUser, name: str) -> dict
         match.finished_at = utc_now()
     session.delete(machine)
     session.commit()
-    return {"removed": name}
 
 
 def machine_summary(session: Session, machine: RunnerMachine) -> dict[str, Any]:

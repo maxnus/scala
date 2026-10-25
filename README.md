@@ -44,7 +44,9 @@ uv run sc2scala login http://127.0.0.1:8000
 
 Signed in on a server's pages, upload a bot as a zip from your page, and its next versions from the bot's own page.
 Enter it, pause it and withdraw it on a ladder's page, or on the bot's; a protected ladder's page asks for its password
-first. The CLI does the same, and takes a bot's folder as well as its zip:
+first. Make a ladder from the home page; its owner changes its password, limits and maps on its settings page, and bars
+runners on its runners page. Your page also sets which ladders each of your runner machines serves. The CLI does the
+same, and takes a bot's folder as well as its zip:
 
 ```bash
 uv run sc2scala bot upload MyBot path/to/MyBot --race T
@@ -56,9 +58,10 @@ uv run sc2scala ladder show night-league
 `--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala bot --help` and
 `sc2scala ladder --help` list the rest.
 
-`sc2scala ladder runners LADDER` lists the runner machines that played a ladder's matches. Its owner bars one with
-`sc2scala ladder bar-runner LADDER OWNER/MACHINE`, which voids its results there, unless `--keep-results`, and fits the
-ratings again; `unbar-runner` lets it play again, and what the bar voided stays void.
+A ladder's runners page, or `sc2scala ladder runners LADDER`, lists the runner machines that played its matches. Its
+owner bars one there, or with `sc2scala ladder bar-runner LADDER OWNER/MACHINE`, which voids its results there, unless
+its results are kept, and fits the ratings again; lifting the bar, or `unbar-runner`, lets it play again, and what the
+bar voided stays void.
 
 ## Running matches
 

@@ -46,8 +46,8 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 ### Bots
 
 A bot is a name, a race (Terran, Zerg, Protoss or random), AI Arena's type for it and an upload, a zip in AI Arena's
-layout, its files at the zip's root or in the one folder it holds. Scala reads the type from the first of these the bot's folder holds (`BotType.from_folder`), and the engine
-starts the bot as its type says:
+layout, its files at the zip's root or in the one folder it holds. Scala reads the type from the first of these the
+bot's folder holds (`BotType.from_folder`), and the engine starts the bot as its type says:
 
 | The folder holds | Started as | AI Arena's type |
 |---|---|---|
@@ -208,8 +208,8 @@ Each step ends in something that runs, and is a pull request of its own.
 6. **The browser**: everything but running a runner done in the pages, in three pull requests.
    - 6a, done: bots and entries: a new bot and its versions, joining a protected ladder, and entering, pausing,
      resuming and withdrawing bots. A zip of the bot's folder itself is read as that folder.
-   - 6b: ladders and runners, for their owners: making a ladder and changing it, a ladder's runners and barring them,
-     and which ladders one's machines serve.
+   - 6b, done: ladders and runners, for their owners: making a ladder and changing its password, limits and maps; a
+     ladder's runners, and barring them; and which ladders one's machines serve, and removing one.
    - 6c: `sc2scala login` signed in through the browser, and the README begun in the browser.
 7. **The first public server**, on the owner's VPS. Its reverse proxy limits a request's body, since the app receives an
    upload whole before it checks who sent it.

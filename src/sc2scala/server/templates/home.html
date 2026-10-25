@@ -2,6 +2,7 @@
 {% block main %}
   <h1>Ladders</h1>
   <p class="lead">StarCraft II ladders between bots, played on runners their members contribute.</p>
+  {% if user %}<p><a class="button" href="/ladders/new">Make a ladder</a></p>{% endif %}
   {% if ladders %}
     <div class="scrolls">
     <table>
@@ -19,6 +20,6 @@
     </table>
     </div>
   {% else %}
-    <p>No ladder yet. Make one with <code>sc2scala ladder create</code>.</p>
+    <p>No ladder yet.{% if not user %} <a href="/sign-in">Sign in</a> to make one.{% endif %}</p>
   {% endif %}
 {% endblock %}

@@ -105,3 +105,12 @@ td.actions { white-space: nowrap; }
 td.actions form + form { margin-left: 12px; }
 .notice { padding: 8px 12px; border: 1px solid var(--accent); border-radius: 6px; }
 .notice.refused { border-color: var(--refused); color: var(--refused); }
+form.stacked { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+form.stacked > label { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+form.stacked .note { margin: -4px 0 4px; }
+fieldset.limits { border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; padding: 8px 12px; }
+fieldset.limits label { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0; }
+fieldset.limits input { width: 9em; }
+details summary { cursor: pointer; color: var(--accent); }
+details.machine { margin-top: 4px; }
+button.secondary { background: none; color: var(--accent); }

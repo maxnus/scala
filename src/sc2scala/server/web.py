@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from sc2scala.errors import UploadRefusedError
 from sc2scala.server.api_tokens import hash_of_token
 from sc2scala.server.models import ApiToken, RunnerMachine, User, utc_now
 
@@ -162,6 +163,11 @@ def redirect_with_notice(
         "kept": {name: _shortened(value) for name, value in (kept or {}).items()},
     }
     return RedirectResponse(path, status_code=303)
+
+
+def refusal_reason(error: HTTPException | UploadRefusedError) -> str:
+    """Why a form's action was refused, in words its page shows."""
+    return str(error.detail) if isinstance(error, HTTPException) else str(error)
 
 
 def _notice_for(request: Request) -> dict[str, Any] | None:

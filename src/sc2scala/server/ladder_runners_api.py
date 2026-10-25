@@ -4,6 +4,7 @@ A runner is named `owner/name`, by its owner's login now, but kept by its owner'
 holds whatever the owner's login becomes.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -36,7 +37,39 @@ class BarRequest(BaseModel):
 def ladder_runners(session: DatabaseSession, user: TokenUser, name: str) -> list[dict[str, Any]]:
     """Every runner that played the ladder's matches, or that its owner barred, with its matches by status, its
     latest, and its bar, the most matches first."""
-    ladder = visible_ladder(session, name, user)
+    return [
+        {
+            "runner": record.runner,
+            "finished": record.finished,
+            "void": record.void,
+            "being_played": record.being_played,
+            "last_drawn_at": record.last_drawn_at.isoformat() if record.last_drawn_at else None,
+            "barred_at": record.bar.barred_at.isoformat() if record.bar else None,
+            "results_voided": record.bar.results_voided if record.bar else None,
+        }
+        for record in runners_of(session, visible_ladder(session, name, user))
+    ]
+
+
+@dataclass(frozen=True)
+class RunnerRecord:
+    """A runner's matches in a ladder, by status, its latest draw there, and its bar there, if any."""
+
+    runner: str
+    finished: int
+    void: int
+    being_played: int
+    last_drawn_at: datetime | None
+    bar: BarredRunner | None
+
+    @property
+    def owner_and_machine(self) -> tuple[str, str]:
+        owner, _, machine = self.runner.partition("/")
+        return owner, machine
+
+
+def runners_of(session: Session, ladder: Ladder) -> list[RunnerRecord]:
+    """Every runner that played the ladder's matches, or that its owner barred, the most finished matches first."""
     counts: dict[str, dict[str, int]] = {}
     latest: dict[str, datetime] = {}
     for login, machine_name, status, count, last_drawn_at in session.execute(
@@ -58,15 +91,14 @@ def ladder_runners(session: DatabaseSession, user: TokenUser, name: str) -> list
     no_matches = {FINISHED: 0, VOID: 0, LEASED: 0}
     runners = sorted(set(counts) | set(bars), key=lambda runner: (-counts.get(runner, no_matches)[FINISHED], runner))
     return [
-        {
-            "runner": runner,
-            "finished": counts.get(runner, no_matches)[FINISHED],
-            "void": counts.get(runner, no_matches)[VOID],
-            "being_played": counts.get(runner, no_matches)[LEASED],
-            "last_drawn_at": latest[runner].isoformat() if runner in latest else None,
-            "barred_at": bars[runner].barred_at.isoformat() if runner in bars else None,
-            "results_voided": bars[runner].results_voided if runner in bars else None,
-        }
+        RunnerRecord(
+            runner=runner,
+            finished=counts.get(runner, no_matches)[FINISHED],
+            void=counts.get(runner, no_matches)[VOID],
+            being_played=counts.get(runner, no_matches)[LEASED],
+            last_drawn_at=latest.get(runner),
+            bar=bars.get(runner),
+        )
         for runner in runners
     ]
 
@@ -80,17 +112,37 @@ def bar_runner(
     Unless `keep_results`, voids its results there too, refits the ratings without them, and lets the entries its
     failed starts paused play again.
     """
+    barred = bar_runner_named(session, user, name, bar.runner, keep_results=bar.keep_results)
+    if barred.results_voided:
+        background.add_task(refit_after_result, request.app, barred.ladder_id)
+    return {"runner": barred.runner, "barred_at": barred.barred_at.isoformat(), "results_voided": barred.results_voided}
+
+
+@dataclass(frozen=True)
+class Bar:
+    """What barring a runner did: the runner, by its owner's login now, when, how many results it voided, and in
+    which ladder, whose ratings need refitting if any."""
+
+    runner: str
+    barred_at: datetime
+    results_voided: int
+    ladder_id: int
+
+
+def bar_runner_named(session: Session, user: User, name: str, runner_name: str, *, keep_results: bool) -> Bar:
+    """Bars the runner `runner_name`, `owner/name`, from the owner's ladder, as `bar_runner` says, but for refitting
+    the ratings, which is the caller's; 404 for no such runner, 409 if it is barred already."""
     ladder = owned_ladder(session, name, user)
-    owner_login, _, machine_name = bar.runner.partition("/")
+    owner_login, _, machine_name = runner_name.partition("/")
     owner = user_named(session, owner_login)
     if owner is None or not _runner_exists(session, ladder, owner, machine_name):
-        raise HTTPException(404, f"No runner machine is named {bar.runner}")
+        raise HTTPException(404, f"No runner machine is named {runner_name}")
     runner = f"{owner.login}/{machine_name}"
     if _bar_of(ladder, owner, machine_name) is not None:
         raise HTTPException(409, f"{runner} is barred from {ladder.name} already")
     now = utc_now()
     ladder.barred_runners.append(
-        BarredRunner(owner=owner, machine_name=machine_name, barred_at=now, results_voided=not bar.keep_results)
+        BarredRunner(owner=owner, machine_name=machine_name, barred_at=now, results_voided=not keep_results)
     )
     played_there = (
         MatchRecord.ladder_id == ladder.id,
@@ -98,7 +150,7 @@ def bar_runner(
         MatchRecord.runner_machine_name == machine_name,
     )
     results_voided = 0
-    if not bar.keep_results:
+    if not keep_results:
         finished = (*played_there, MatchRecord.status == FINISHED)
         results_voided = session.scalar(select(func.count()).select_from(MatchRecord).where(*finished)) or 0
         _forget_failed_starts(session, ladder, finished)
@@ -106,14 +158,17 @@ def bar_runner(
     being_played = (*played_there, MatchRecord.status == LEASED)
     _void(session, being_played, because="its runner was barred by the ladder's owner while it played", now=now)
     commit_or_conflict(session, f"{runner} was barred from {ladder.name} at the same moment")
-    if results_voided:
-        background.add_task(refit_after_result, request.app, ladder.id)
-    return {"runner": runner, "barred_at": now.isoformat(), "results_voided": results_voided}
+    return Bar(runner=runner, barred_at=now, results_voided=results_voided, ladder_id=ladder.id)
 
 
 @router.delete("/{name}/barred-runners/{owner}/{machine}")
 def unbar_runner(session: DatabaseSession, user: TokenUser, name: str, owner: str, machine: str) -> dict[str, Any]:
     """Lets a barred runner play the ladder's matches again, for the ladder's owner alone; what it voided stays void."""
+    return {"runner": unbar_runner_named(session, user, name, owner, machine), "barred": False}
+
+
+def unbar_runner_named(session: Session, user: User, name: str, owner: str, machine: str) -> str:
+    """Lifts the bar of the runner `owner/machine` from the owner's ladder, and returns its name; 404 if not barred."""
     ladder = owned_ladder(session, name, user)
     owner_user = user_named(session, owner)
     bar = _bar_of(ladder, owner_user, machine) if owner_user is not None else None
@@ -122,7 +177,7 @@ def unbar_runner(session: DatabaseSession, user: TokenUser, name: str, owner: st
     runner = bar.runner_name
     ladder.barred_runners.remove(bar)
     session.commit()
-    return {"runner": runner, "barred": False}
+    return runner
 
 
 def barred_from(session: Session, machine: RunnerMachine) -> list[str]:

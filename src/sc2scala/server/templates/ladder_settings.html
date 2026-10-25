@@ -14,10 +14,14 @@
     <button type="submit">{{ "Change the password" if ladder.is_protected else "Protect it" }}</button>
   </form>
   {% if ladder.is_protected %}
-    <form method="post" action="/ladders/{{ ladder.name }}/password/remove" class="row">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="secondary">Remove the password</button>
-    </form>
+    <details>
+      <summary>Remove the password…</summary>
+      <form method="post" action="/ladders/{{ ladder.name }}/password/remove" class="row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <span class="note">Anyone then sees its standings, matches and replays.</span>
+        <button type="submit" class="secondary">Make {{ ladder.name }} public</button>
+      </form>
+    </details>
   {% endif %}
   <h2>Maps</h2>
   <table>
@@ -48,7 +52,7 @@
   <p class="note">The next matches take the limits as changed; the matches being played keep theirs.</p>
   <form method="post" action="/ladders/{{ ladder.name }}/limits" class="stacked">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ limit_inputs(limit_groups, limits, {}) }}
+    {{ limit_inputs(limit_groups, limits, notice.kept if notice and notice.kept else {}) }}
     <button type="submit">Change the limits</button>
   </form>
   <h2>Runners</h2>

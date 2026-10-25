@@ -16,6 +16,7 @@ from sc2scala.server.ladder_runners_api import bar_runner_named, unbar_runner_na
 from sc2scala.server.ladders_api import (
     add_maps,
     change_ladder_settings,
+    ladder_named,
     make_ladder,
     owned_ladder,
     remove_map_named,
@@ -168,7 +169,7 @@ def change_limits(
     try:
         change_ladder_settings(session, user, name, limit_changes=dict(limit_changes))
     except (HTTPException, UploadRefusedError) as error:
-        return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
+        return redirect_with_notice(request, settings, refusal_reason(error), refused=True, kept=limit_changes)
     return redirect_with_notice(request, settings, "Changed the limits, which the next matches take")
 
 
@@ -185,12 +186,15 @@ def add_maps_to_ladder(
     """Adds the uploaded maps to the ladder's pool, none if one is refused."""
     check_csrf(request, csrf_token)
     settings = f"/ladders/{name}/settings"
+    pool = ladder_named(session, name)
+    held_before = {(map_file.name, map_file.sha256) for map_file in pool.maps} if pool else set()
     try:
-        add_maps(request, session, user, name, maps)
+        ladder = add_maps(request, session, user, name, maps)
     except (HTTPException, UploadRefusedError) as error:
         return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
-    added = ", ".join(upload.filename or "a map" for upload in maps)
-    return redirect_with_notice(request, settings, f"Added {added}")
+    added = [map_file.name for map_file in ladder.maps if (map_file.name, map_file.sha256) not in held_before]
+    message = f"Added {', '.join(added)}" if added else f"{ladder.name} holds those maps already"
+    return redirect_with_notice(request, settings, message)
 
 
 @router.post("/ladders/{name}/maps/{map_name}/remove")

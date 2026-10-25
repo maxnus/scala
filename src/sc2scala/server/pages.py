@@ -18,7 +18,14 @@ from sc2scala.server.ladder_ratings import (
     standings,
 )
 from sc2scala.server.ladder_runners_api import runners_of
-from sc2scala.server.ladders_api import is_member, ladder_named, may_enter, may_withdraw, visible_ladder
+from sc2scala.server.ladders_api import (
+    is_member,
+    ladder_named,
+    may_enter,
+    may_withdraw,
+    visible_ladder,
+    visible_ladders,
+)
 from sc2scala.server.match_draw import LEASED, VOID
 from sc2scala.server.matches_api import (
     logs_of,
@@ -170,11 +177,7 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
     is_author = user is not None and bot.owner_id == user.id
     entered_ladders = {entry.ladder_id for entry in bot_entries}
     enterable_ladders = (
-        [
-            ladder
-            for ladder in session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
-            if ladder.id not in entered_ladders and may_enter(ladder, user)
-        ]
+        [ladder for ladder in visible_ladders(session, user) if ladder.id not in entered_ladders]
         if is_author and bot.latest_version
         else []
     )

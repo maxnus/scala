@@ -3,14 +3,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from sc2scala.race import Race
 from sc2scala.server.api_tokens import hash_of_token, new_token
 from sc2scala.server.bots_api import bots_of
 from sc2scala.server.ladder_runners_api import barred_from
-from sc2scala.server.ladders_api import is_member
-from sc2scala.server.models import ApiToken, Ladder, RunnerMachine, User
+from sc2scala.server.ladders_api import visible_ladders
+from sc2scala.server.models import ApiToken, RunnerMachine, User
 from sc2scala.server.web import DatabaseSession, check_csrf, render, required_user
 
 router = APIRouter()
@@ -64,11 +64,7 @@ def _render_account(request: Request, session: Session, user: User, **context: A
     machines = list(
         session.scalars(select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name))
     )
-    servable_ladders = [
-        ladder
-        for ladder in session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
-        if not ladder.is_protected or is_member(ladder, user)
-    ]
+    servable_ladders = visible_ladders(session, user)
     return render(
         request,
         "account.html",

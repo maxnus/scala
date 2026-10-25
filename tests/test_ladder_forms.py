@@ -1,11 +1,14 @@
 """The pages and forms of a ladder's owner, and of a runner machine's, used as a browser would."""
 
+import inspect
 import random
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from sc2scala.server.ladder_forms import limit_changes_from_form
+from sc2scala.server.ladder_limits import LIMIT_GROUPS
 from tests.conftest import MAP_BYTES, sign_in_dev
 from tests.match_helpers import LadderWithBots, draw, ladder_with_bots, report
 from tests.test_bot_forms import submit
@@ -79,6 +82,7 @@ def test_the_owner_protects_and_opens_the_ladder(ladder: LadderWithBots) -> None
     assert "A password cannot be empty" in page.text
     page = submit(server, settings, "/ladders/league/password", {"new_password": "pw"})
     assert "league has a new password" in page.text and details_of(ladder)["protected"]
+    assert "<summary>Remove the password…</summary>" in server.get(settings).text
     page = submit(server, settings, "/ladders/league/password/remove", {})
     assert "league is public now" in page.text and not details_of(ladder)["protected"]
 
@@ -91,9 +95,16 @@ def test_the_owner_changes_the_limits_which_must_fit(ladder: LadderWithBots) -> 
     assert "Changed the limits" in page.text
     limits = details_of(ladder)["resource_limits"]
     assert (limits["bot_cpus"], limits["bot_log_mib"]) == (1.5, 50)
-    page = submit(server, settings, "/ladders/league/limits", {"bot_processes": "0"})
+    page = submit(server, settings, "/ladders/league/limits", {"bot_processes": "0", "game_memory_mib": "4096"})
     assert "bot_processes is a positive whole number" in page.text
+    assert 'name="bot_processes" value="0"' in page.text and 'name="game_memory_mib" value="4096"' in page.text
     assert details_of(ladder)["resource_limits"]["bot_processes"] == 1024
+    assert 'name="bot_processes" value="1024"' in server.get(settings).text
+
+
+def test_the_forms_take_every_limit_the_pages_show() -> None:
+    shown = [field.name for _, group in LIMIT_GROUPS for field in group]
+    assert list(inspect.signature(limit_changes_from_form).parameters) == shown
 
 
 def test_the_owner_adds_maps_and_takes_them_out_but_the_last(ladder: LadderWithBots) -> None:
@@ -101,7 +112,9 @@ def test_the_owner_adds_maps_and_takes_them_out_but_the_last(ladder: LadderWithB
     sign_in_dev(server, "alice")
     settings = "/ladders/league/settings"
     page = submit(server, settings, "/ladders/league/maps", {}, files=map_files("C", "D"))
-    assert "Added C.SC2Map, D.SC2Map" in page.text
+    assert "Added C, D" in page.text
+    page = submit(server, settings, "/ladders/league/maps", {}, files=map_files("C"))
+    assert "league holds those maps already" in page.text
     for name in ("C", "D", "PylonAIE_v4"):
         assert f"Took {name} out" in submit(server, settings, f"/ladders/league/maps/{name}/remove", {}).text
     assert [map_file["name"] for map_file in details_of(ladder)["maps"]] == ["TorchesAIE_v4"]

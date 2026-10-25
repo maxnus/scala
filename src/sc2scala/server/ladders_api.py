@@ -291,6 +291,12 @@ def resume_in_ladder(session: Session, user: User, name: str, bot_name: str) -> 
     return entry
 
 
+def visible_ladders(session: Session, user: User | None) -> list[Ladder]:
+    """The ladders `user` sees, by name: every public one, and the protected ones they are a member of."""
+    ladders = session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
+    return [ladder for ladder in ladders if not ladder.is_protected or is_member(ladder, user)]
+
+
 def may_withdraw(entry: LadderEntry, user: User | None) -> bool:
     """Whether `user` may take the entry out of its ladder: its bot's author or the ladder's owner."""
     return user is not None and user.id in (entry.bot.owner_id, entry.ladder.owner_id)

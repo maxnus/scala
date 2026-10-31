@@ -27,7 +27,7 @@ TokenUser = Annotated[User, Depends(token_user)]
 
 
 @dataclass(frozen=True)
-class Removal:
+class RemovalOutcome:
     """What removing a bot or a ladder did: deleted it, if it never played a match, or else retired it."""
 
     name: str
@@ -143,7 +143,7 @@ def commit_or_conflict(session: Session, conflict: str) -> None:
         raise HTTPException(409, conflict) from error
 
 
-def remove_bot_named(session: Session, user: User, name: str) -> Removal:
+def remove_bot_named(session: Session, user: User, name: str) -> RemovalOutcome:
     """Deletes the user's bot, its versions with it, if it never played a match, and frees its name; or else retires
     it, which takes it out of every ladder but the retired ones, whose standings stay as they ended, and keeps its
     matches, its ratings and its name.
@@ -155,10 +155,13 @@ def remove_bot_named(session: Session, user: User, name: str) -> Removal:
         raise HTTPException(403, f"{bot.name} is {bot.owner.login}'s")
     if bot.retired_at is not None:
         raise HTTPException(409, f"{bot.name} is retired already")
+    # Retired first, which takes the database's write lock, so that no match is drawn for it between the count and
+    # the delete, which would delete that match with it.
+    bot.retired_at = utc_now()
+    session.flush()
     matches = matches_of_bot(session, bot)
-    removal = Removal(name=bot.name, retired=matches > 0, matches=matches)
+    removal = RemovalOutcome(name=bot.name, retired=matches > 0, matches=matches)
     if removal.retired:
-        bot.retired_at = utc_now()
         open_ladders = select(Ladder.id).where(Ladder.retired_at.is_(None))
         session.execute(
             delete(LadderEntry).where(LadderEntry.bot_id == bot.id, LadderEntry.ladder_id.in_(open_ladders))
@@ -167,6 +170,11 @@ def remove_bot_named(session: Session, user: User, name: str) -> Removal:
         session.delete(bot)
     session.commit()
     return removal
+
+
+def playing_bots_of(session: Session, user: User | None) -> list[BotRecord]:
+    """The user's bots but the retired, by name; none for nobody."""
+    return [bot for bot in bots_of(session, user) if bot.retired_at is None]
 
 
 def matches_of_bot(session: Session, bot: BotRecord) -> int:
@@ -178,7 +186,7 @@ def matches_of_bot(session: Session, bot: BotRecord) -> int:
     return session.scalar(select(func.count()).select_from(MatchRecord).where(played)) or 0
 
 
-def removal_summary(removal: Removal) -> dict[str, Any]:
+def removal_summary(removal: RemovalOutcome) -> dict[str, Any]:
     return {
         "name": removal.name,
         "outcome": "retired" if removal.retired else "deleted",

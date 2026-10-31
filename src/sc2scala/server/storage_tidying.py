@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from loguru import logger
-from sqlalchemy import Engine, or_, select, update
+from sqlalchemy import Engine, func, or_, select, update
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from sc2scala.server.bots_api import BOT_ARCHIVE_SUFFIX, BOT_ARCHIVES
@@ -64,14 +64,14 @@ def drop_old_logs(session: Session, *, keep_logs_days: int, now: datetime) -> in
         MatchRecord.engine_logs_sha256.is_not(None),
     )
     old_enough = MatchRecord.finished_at < now - timedelta(days=keep_logs_days)
-    match_ids = list(session.scalars(select(MatchRecord.id).where(old_enough, has_logs)))
-    if match_ids:
+    dropped = session.scalar(select(func.count()).select_from(MatchRecord).where(old_enough, has_logs)) or 0
+    if dropped:
         session.execute(
             update(MatchRecord)
-            .where(MatchRecord.id.in_(match_ids))
+            .where(old_enough, has_logs)
             .values(player_1_logs_sha256=None, player_2_logs_sha256=None, engine_logs_sha256=None)
         )
-    return len(match_ids)
+    return dropped
 
 
 def held_files(session: Session) -> dict[str, set[str]]:

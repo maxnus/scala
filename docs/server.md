@@ -130,8 +130,9 @@ sudo systemctl reload caddy
 ```
 
 Caddy gets the domain's certificate once the domain points at the machine and ports 80 and 443 are open. The server
-receives an upload whole before it checks who sent it, so Caddy refuses a body past `max_size`: 600 MB holds a bot's
-zip of 500 MiB and the form around it. Raise both together, with the server's `max_bot_mib`.
+receives an upload whole before it checks who sent it, so Caddy refuses a body past `max_size`. 600 MB holds a bot's
+zip of 500 MiB and the form around it, and a match's result, its replay and its logs, of which each bot's are cut at
+100 MiB. Raise it if you raise the server's `max_bot_mib`, or if a ladder lets each bot log more than 200 MiB.
 
 Caddy runs on the same machine, since the server trusts the forwarded headers of a proxy at 127.0.0.1 alone: from
 them it learns each visitor's address, which limits how many sign-ins may wait from one, and that the pages are served

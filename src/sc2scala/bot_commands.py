@@ -7,8 +7,8 @@ from typing import Any
 
 import httpx
 
-from sc2scala.command_confirmation import confirm_at_terminal
 from sc2scala.errors import ScalaError
+from sc2scala.removal_commands import confirm_at_terminal, removal_line
 from sc2scala.scala_client import ScalaClient
 from sc2scala.signed_in_client import signed_in_client
 
@@ -36,10 +36,11 @@ def add_bot_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> None
     show.add_argument("name")
     remove = commands.add_parser(
         "remove",
-        help="delete your bot, or retire it if it played",
+        help="delete your bot, or retire it if it was drawn for a match",
         description=(
-            "Deletes your bot, with its versions, if it never played a match, and frees its name; or else retires it: "
-            "it is taken out of every ladder and takes no new version, and its matches, ratings and name stay."
+            "Deletes your bot, with its versions, if it was never drawn for a match, and frees its name; or else "
+            "retires it: it is taken out of every ladder and takes no new version, and its matches, ratings and name "
+            "stay."
         ),
     )
     remove.add_argument("name")
@@ -59,11 +60,12 @@ def run_bot_command(args: argparse.Namespace, *, http: httpx.Client | None) -> i
                 print(_bot_line(bot))
         case "remove":
             confirm_at_terminal(
-                f"Remove {args.name}? It is deleted if it never played, or else retired, its matches kept.",
+                f"Remove {args.name}? It is deleted if it was never drawn for a match, or else retired, its matches "
+                "kept.",
                 assume_yes=args.yes,
             )
             removed = client.remove_bot(args.name)
-            print(removal_line(removed, played="played", stays="it plays no more, and its matches stay"))
+            print(removal_line(removed, drawn="was drawn for", stays="it plays no more, and its matches stay"))
         case "show":
             bot = client.bot(args.name)
             print(_bot_line(bot))
@@ -103,11 +105,3 @@ def _bot_line(bot: dict[str, Any]) -> str:
         + (f"version {version}" if version else "no version")
         + retired
     )
-
-
-def removal_line(removed: dict[str, Any], *, played: str, stays: str) -> str:
-    """What removing a bot or a ladder did, as the server's answer says: `played` is what it did in its matches."""
-    if removed["outcome"] == "deleted":
-        return f"Deleted {removed['name']}"
-    matches = removed["matches"]
-    return f"Retired {removed['name']}, which {played} {matches} {'match' if matches == 1 else 'matches'}: {stays}"

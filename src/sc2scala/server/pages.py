@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.race import Race
 from sc2scala.result_code import ResultCode
-from sc2scala.server.bots_api import bot_named, bots_of, matches_of_bot
+from sc2scala.server.bots_api import bot_named, matches_of_bot, playing_bots_of
 from sc2scala.server.ladder_ratings import (
     INTERVAL_WIDTH,
     PRIOR_SD,
@@ -78,7 +78,7 @@ def ladder_page(request: Request, session: DatabaseSession, user: SignedInUser, 
     if ladder.is_protected and not is_member(ladder, user):
         return render(request, "ladder_join.html", user=user, ladder=ladder, status_code=403)
     entered = {entry.bot_id for entry in ladder.entries}
-    own_bots = bots_of(session, user)
+    own_bots = playing_bots_of(session, user)
     return render(
         request,
         "ladder.html",

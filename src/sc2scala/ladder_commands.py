@@ -7,9 +7,8 @@ from typing import Any
 
 import httpx
 
-from sc2scala.bot_commands import removal_line
-from sc2scala.command_confirmation import confirm_at_terminal
-from sc2scala.errors import ScalaError
+from sc2scala.errors import ScalaError, ServerError
+from sc2scala.removal_commands import confirm_at_terminal, removal_line
 from sc2scala.scala_client import ScalaClient
 from sc2scala.signed_in_client import signed_in_client
 
@@ -116,7 +115,7 @@ def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -
                 assume_yes=args.yes,
             )
             removed = client.remove_ladder(args.name)
-            print(removal_line(removed, played="drew", stays="it draws no more, and keeps its standings and matches"))
+            print(removal_line(removed, drawn="drew", stays="it draws no more, and keeps its standings and matches"))
         case "join":
             print(_description_of(_join(client, args.name)))
         case "enter":
@@ -186,13 +185,14 @@ def _new_password() -> str:
 
 
 def _join(client: ScalaClient, name: str) -> dict[str, Any]:
-    summary = next((ladder for ladder in client.ladders() if ladder["name"].lower() == name.lower()), None)
-    if summary is None:
-        raise ScalaError(f"No ladder is named {name}")
-    needs_password = summary["protected"] and not summary.get("member", False)
-    return client.join_ladder(
-        name, password=getpass.getpass(f"{summary['name']}'s password: ") if needs_password else ""
-    )
+    """Joins the ladder, asking for its password if the user may not see it yet; a retired ladder too."""
+    try:
+        client.ladder(name)
+    except ServerError as error:
+        if error.status_code != 403:
+            raise
+        return client.join_ladder(name, password=getpass.getpass(f"{name}'s password: "))
+    return client.join_ladder(name, password="")
 
 
 def _summary_line(ladder: dict[str, Any]) -> str:

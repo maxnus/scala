@@ -69,11 +69,12 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <span class="note">
           {% if matches_played %}
-            It played {{ matches_played }} {{ "match" if matches_played == 1 else "matches" }}, so it is retired rather
-            than deleted: taken out of every ladder, given no new version, and left out of the list of bots. Its
+            It was drawn for {{ matches_played }} {{ "match" if matches_played == 1 else "matches" }}, so it is retired
+            rather than deleted: taken out of every ladder, given no new version, and left out of the list of bots. Its
             matches and ratings stay, and so does its name.
           {% else %}
-            It never played, so it is deleted, with its versions, and its name is free again. This cannot be undone.
+            It was never drawn for a match, so it is deleted, with its versions, and its name is free again. This
+            cannot be undone.
           {% endif %}
         </span>
         <button type="submit" class="secondary">{{ verb }} {{ bot.name }}</button>

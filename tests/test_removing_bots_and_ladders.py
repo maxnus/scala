@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from sc2scala.bot_commands import removal_line
-from tests.conftest import PYTHON_BOT_ZIP, sign_in_dev, zip_of
+from sc2scala.removal_commands import removal_line
+from tests.conftest import PYTHON_BOT_ZIP, api_headers_of, sign_in_dev, zip_of
 from tests.match_helpers import LadderWithBots, draw, ladder_with_bots, machine_headers, report
 from tests.test_bot_forms import submit
 from tests.test_bots_api import upload
@@ -115,10 +115,10 @@ def test_the_pages_delete_a_bot_that_never_played_and_retire_one_that_did(ladder
     sign_in_dev(server, "bob")
     assert "Delete basic_bot" not in server.get("/bots/basic_bot").text
     sign_in_dev(server, "alice")
-    assert "It never played, so it is deleted" in server.get("/bots/spare_bot").text
+    assert "It was never drawn for a match, so it is deleted" in server.get("/bots/spare_bot").text
     page = submit(server, "/bots/spare_bot", "/bots/spare_bot/remove", {})
     assert str(page.url).endswith("/account") and "Deleted spare_bot" in page.text
-    assert "It played 1 match, so it is retired" in server.get("/bots/basic_bot").text
+    assert "It was drawn for 1 match, so it is retired" in server.get("/bots/basic_bot").text
     page = submit(server, "/bots/basic_bot", "/bots/basic_bot/remove", {})
     assert str(page.url).endswith("/bots/basic_bot") and "Retired basic_bot: it plays no more" in page.text
     assert "Upload a new version" not in page.text and "Retire basic_bot…" not in page.text
@@ -141,12 +141,12 @@ def test_the_settings_page_deletes_a_ladder_that_never_drew_and_retires_one_that
 
 
 def test_what_a_removal_did_is_said_in_a_line() -> None:
-    assert removal_line({"name": "night", "outcome": "deleted", "matches": 0}, played="drew", stays="") == (
+    assert removal_line({"name": "night", "outcome": "deleted", "matches": 0}, drawn="drew", stays="") == (
         "Deleted night"
     )
     retired = {"name": "basic_bot", "outcome": "retired", "matches": 1}
-    assert removal_line(retired, played="played", stays="it plays no more") == (
-        "Retired basic_bot, which played 1 match: it plays no more"
+    assert removal_line(retired, drawn="was drawn for", stays="it plays no more") == (
+        "Retired basic_bot, which was drawn for 1 match: it plays no more"
     )
 
 
@@ -172,3 +172,72 @@ def test_removing_asks_at_the_terminal_and_needs_yes_without_one(
     create_ladder(ladder.server, ladder.alice, "night")
     assert main(["ladder", "remove", "night", "--yes"], http=ladder.server) == 0
     assert ladder.server.get("/api/ladders/night", headers=ladder.alice).status_code == 404
+
+
+def test_a_retired_bot_is_offered_to_no_ladder_and_its_name_not_for_a_new_bot(ladder: LadderWithBots) -> None:
+    server = ladder.server
+    create_ladder(server, ladder.alice, "night")
+    play_one(server, ladder.runner)
+    server.delete("/api/bots/basic_bot", headers=ladder.alice)
+    sign_in_dev(server, "alice")
+    assert "<option>basic_bot</option>" not in server.get("/ladders/night").text
+    page = submit(
+        server,
+        "/account",
+        "/bots",
+        {"name": "basic_bot", "race": "T"},
+        files={"archive": ("basic_bot.zip", PYTHON_BOT_ZIP, "application/zip")},
+    )
+    assert "You have a bot named basic_bot already, retired: choose another name" in page.text
+
+
+def test_a_retired_ladders_standings_stay_as_they_ended_and_no_machine_may_serve_it(ladder: LadderWithBots) -> None:
+    server = ladder.server
+    play_one(server, ladder.runner)
+    server.delete("/api/ladders/league", headers=ladder.alice)
+    refused = [
+        server.delete("/api/ladders/league/entries/bobs_bot", headers=ladder.alice),
+        server.post("/api/ladders/league/entries/bobs_bot/pause", headers=ladder.bob),
+        server.patch("/api/runners/desk", headers=ladder.alice, json={"ladders": ["league"]}),
+    ]
+    assert [response.status_code for response in refused] == [409, 409, 409]
+    assert refused[0].json()["detail"] == "league is retired: its standings stay as they ended"
+    sign_in_dev(server, "alice")
+    page = server.get("/ladders/league").text
+    assert "/withdraw" not in page and "/pause" not in page
+    assert '<a href="/ladders/league">league</a> <span class="muted">(retired)</span>' in server.get("/account").text
+
+
+def test_a_retired_protected_ladder_is_joined_from_the_command_line(
+    server: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    from sc2scala.cli import main
+
+    server.app.state.match_random = random.Random(11)  # type: ignore[attr-defined]
+    ladder = ladder_with_bots(server, ladder="secret", password="pw")
+    play_one(server, machine_headers(server, ladder.alice, "secret-desk", ladders=["secret"]))
+    server.delete("/api/ladders/secret", headers=ladder.alice)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    carol = api_headers_of(server, "carol")
+    assert (
+        main(["login", "http://localhost", "--token", carol["Authorization"].removeprefix("Bearer ")], http=server) == 0
+    )
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "pw")
+    assert main(["ladder", "join", "secret"], http=server) == 0
+    assert server.get("/api/ladders/secret", headers=carol).status_code == 200
+
+
+def test_ctrl_d_at_the_question_answers_no(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sc2scala.errors import ScalaError
+    from sc2scala.removal_commands import confirm_at_terminal
+
+    terminal = io.StringIO("")
+    terminal.isatty = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr("sys.stdin", terminal)
+
+    def end_of_input(question: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", end_of_input)
+    with pytest.raises(ScalaError, match="nothing was changed"):
+        confirm_at_terminal("Remove it?", assume_yes=False)

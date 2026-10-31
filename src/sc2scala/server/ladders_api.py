@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.errors import UploadRefusedError
-from sc2scala.server.bots_api import Removal, bot_named, commit_or_conflict, removal_summary
+from sc2scala.server.bots_api import RemovalOutcome, bot_named, commit_or_conflict, removal_summary
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import limits_changed
 from sc2scala.server.ladder_ratings import Standing, standings
@@ -194,7 +194,7 @@ def change_ladder_settings(
     return ladder
 
 
-def remove_ladder_named(session: Session, user: User, name: str) -> Removal:
+def remove_ladder_named(session: Session, user: User, name: str) -> RemovalOutcome:
     """Deletes the owner's ladder, its entries, members and bars with it, if it never drew a match, and frees its name;
     or else retires it: it draws no more matches and takes no more entries, no machine serves it, and it keeps its
     standings as they ended, its matches and its name. A match being played still counts once reported.
@@ -204,10 +204,13 @@ def remove_ladder_named(session: Session, user: User, name: str) -> Removal:
     ladder = owned_ladder(session, name, user)
     if ladder.retired_at is not None:
         raise HTTPException(409, f"{ladder.name} is retired already")
+    # Retired first, which takes the database's write lock, so that no match is drawn in it between the count and the
+    # delete, which would delete that match with it.
+    ladder.retired_at = utc_now()
+    session.flush()
     matches = matches_in_ladder(session, ladder)
-    removal = Removal(name=ladder.name, retired=matches > 0, matches=matches)
+    removal = RemovalOutcome(name=ladder.name, retired=matches > 0, matches=matches)
     if removal.retired:
-        ladder.retired_at = utc_now()
         session.execute(delete(runner_machine_ladders).where(runner_machine_ladders.c.ladder_id == ladder.id))
     else:
         session.delete(ladder)
@@ -306,8 +309,9 @@ def enter_in_ladder(session: Session, user: User, name: str, bot_name: str) -> L
 
 
 def withdraw_from_ladder(session: Session, user: User, name: str, bot_name: str) -> Ladder:
-    """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else."""
-    ladder = visible_ladder(session, name, user)
+    """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else, and 409 in a retired
+    ladder, whose standings stay as they ended."""
+    ladder = _open_ladder(visible_ladder(session, name, user))
     entry = _entry_of(ladder, bot_name)
     if not may_withdraw(entry, user):
         raise HTTPException(
@@ -444,6 +448,13 @@ def owned_ladder(session: Session, name: str, user: User) -> Ladder:
     return ladder
 
 
+def _open_ladder(ladder: Ladder) -> Ladder:
+    """The ladder, unless it is retired: 409 then, since its standings stay as they ended."""
+    if ladder.retired_at is not None:
+        raise HTTPException(409, f"{ladder.name} is retired: its standings stay as they ended")
+    return ladder
+
+
 def _entry_of(ladder: Ladder, bot_name: str) -> LadderEntry:
     entry = next((entry for entry in ladder.entries if entry.bot.name.lower() == bot_name.lower()), None)
     if entry is None:
@@ -452,7 +463,7 @@ def _entry_of(ladder: Ladder, bot_name: str) -> LadderEntry:
 
 
 def _authors_entry(session: Session, name: str, bot_name: str, user: User) -> LadderEntry:
-    entry = _entry_of(visible_ladder(session, name, user), bot_name)
+    entry = _entry_of(_open_ladder(visible_ladder(session, name, user)), bot_name)
     if entry.bot.owner_id != user.id:
         raise HTTPException(403, f"{entry.bot.name} is {entry.bot.owner.login}'s")
     return entry

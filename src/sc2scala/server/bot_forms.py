@@ -51,10 +51,11 @@ def new_bot(
     name = name.strip()
     existing = bot_named(session, name)
     if existing is not None and existing.owner_id == user.id:
+        next_step = "choose another name" if existing.retired_at else "upload its next version on its page"
         return redirect_with_notice(
             request,
             "/account",
-            f"You have a bot named {existing.name} already: upload its next version on its page",
+            f"You have a bot named {existing.name} already{', retired' if existing.retired_at else ''}: {next_step}",
             refused=True,
             kept={"name": name, "race": race},
         )

@@ -117,8 +117,12 @@ def machine_summary(session: Session, machine: RunnerMachine) -> dict[str, Any]:
 
 
 def _ladders_named(session: Session, names: list[str], user: User) -> list[Ladder]:
-    """The ladders named, each one the user may see; 404 or 403 for any other."""
-    return [visible_ladder(session, name, user) for name in dict.fromkeys(names)]
+    """The ladders named, each one the user may see and not retired; 404, 403 or 409 for any other."""
+    ladders = [visible_ladder(session, name, user) for name in dict.fromkeys(names)]
+    retired = next((ladder for ladder in ladders if ladder.retired_at is not None), None)
+    if retired is not None:
+        raise HTTPException(409, f"{retired.name} is retired: it draws no more matches")
+    return ladders
 
 
 def _machine_named(session: Session, user: User, name: str) -> RunnerMachine | None:

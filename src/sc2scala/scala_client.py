@@ -127,6 +127,18 @@ class ScalaClient:
             "POST", "/api/runners", json={"name": name, "serves_public": serves_public, "ladders": list(ladders)}
         )
 
+    def register_by_setup_code(self, setup_code: str, name: str, *, replace: bool) -> dict[str, Any]:
+        """Registers the runner machine a setup code from the pages is for, named `name`; the answer holds its token,
+        once. Needs no token: the code is the user's word. With `replace`, a machine of theirs named `name` becomes
+        this one."""
+        return self._request(
+            "POST", "/api/runners/setup", json={"setup_code": setup_code, "name": name, "replace": replace}
+        )
+
+    def remove_this_machine(self) -> dict[str, Any]:
+        """Removes the runner machine whose token this client holds, which then fails."""
+        return self._request("DELETE", "/api/runner/machine")
+
     def my_machines(self) -> list[dict[str, Any]]:
         return self._request("GET", "/api/runners")
 

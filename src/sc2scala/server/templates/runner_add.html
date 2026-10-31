@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Add a runner · Scala{% endblock %}
+{% block main %}
+  <h1>Add a runner</h1>
+  {% if code %}
+    <section class="new-token">
+      <h2>Your setup code</h2>
+      <p>
+        It registers one machine of yours, once, until {{ setup_code.expires_at.strftime("%H:%M") }} UTC, serving
+        {% if setup_code.serves_public %}every public ladder{% if setup_code.ladders %}, and {% endif %}{% endif %}{% for ladder in setup_code.ladders %}{{ ladder.name }}{% if not loop.last %}, {% endif %}{% endfor %}.
+        Copy it now: this page shows it once, and the server keeps only its hash.
+      </p>
+      <p>On the machine, with Scala installed, run as the user the runner is to run as:</p>
+      <pre>sc2scala runner register --server {{ request.app.state.config.public_url }} --setup-code {{ code }}</pre>
+      <p class="note">
+        The machine takes its host name as its name; put another after <code>register</code> to choose it. If the
+        name is one of your machines' already, add <code>--replace</code> when this computer is that machine set up
+        again. A runner that plays strangers' bots runs as a user of its own, with rootless Docker, as Scala's guide
+        to the sandbox says.
+      </p>
+    </section>
+    <p><a href="/account">Your machines</a> · <a href="/runners/add">Make another code</a></p>
+  {% else %}
+    <p>
+      A runner machine plays the matches of the ladders it serves. This page makes a setup code that registers one
+      machine of yours, serving the ladders ticked: it works once, within an hour, and needs no other sign-in on the
+      machine.
+    </p>
+    {% if refusal %}
+      <p class="notice refused" role="alert">{{ refusal }}</p>
+    {% endif %}
+    <form method="post" action="/runners/add" class="stacked">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label><input type="checkbox" name="serves_public" value="true"{% if ticked_public %} checked{% endif %}> every public ladder</label>
+      {% for ladder in servable_ladders %}
+        <label><input type="checkbox" name="ladders" value="{{ ladder.name }}"{% if ladder.name in ticked_ladders %} checked{% endif %}> {{ ladder.name }}{% if ladder.is_protected %} <span class="muted">(protected)</span>{% endif %}</label>
+      {% endfor %}
+      <button type="submit">Make a setup code</button>
+    </form>
+  {% endif %}
+{% endblock %}

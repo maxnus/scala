@@ -26,14 +26,6 @@ def ladder(server: TestClient) -> LadderWithBots:
 
 
 @pytest.fixture
-def folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The user's config, cache and data folders, each `tmp_path / <its variable, in lower case>`."""
-    for variable in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
-        monkeypatch.setenv(variable, str(tmp_path / variable.lower()))
-    return tmp_path
-
-
-@pytest.fixture
 def registered(ladder: LadderWithBots, folders: Path) -> LadderWithBots:
     """`ladder`, with this computer signed in as alice and registered as her machine `laptop`."""
     token = ladder.alice["Authorization"].removeprefix("Bearer ")
@@ -52,6 +44,8 @@ def test_runner_register_writes_the_machines_settings_once(
     config_file = folders / "xdg_config_home" / "sc2scala" / "runner.toml"
     assert "runners = 1" in config_file.read_text(encoding="utf-8")
     config_file.write_text("runners = 3\n", encoding="utf-8")
+    assert main(["runner", "register", "study"], http=registered.server) == 1, "this computer is laptop already"
+    assert main(["runner", "remove"], http=registered.server) == 0
     capsys.readouterr()
     main(["runner", "register", "study"], http=registered.server)
     assert f"It plays 3 matches at once, at any hour, as {config_file} says" in capsys.readouterr().out

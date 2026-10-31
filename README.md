@@ -32,19 +32,26 @@ On a server's pages, once signed in:
 
 A runner machine plays the matches a server draws for it: every public ladder, or the ladders you choose. It needs
 x86-64 Linux and Docker with Compose 2.20 or later, whose `docker` command your user can run; on Windows, it runs in
-WSL2, as [the WSL2 guide](docs/wsl2.md) says, which nobody has tried on Windows yet. Get Scala from this repository,
-then sign in, register the machine, and start it:
+WSL2, as [the WSL2 guide](docs/wsl2.md) says, which nobody has tried on Windows yet. Get Scala from this repository.
+On the server, *Add a runner*, on your page or a ladder's, makes a setup code for a machine serving the ladders you
+tick. Register the machine with it, and start it:
 
 ```bash
 uv sync
-uv run sc2scala login https://scala.example.org
-uv run sc2scala runner register my-desk
+uv run sc2scala runner register --server https://scala.example.org --setup-code scala_setup_...
 uv run sc2scala runner start
 ```
 
-`login` shows a code and opens the server's page in your browser, where you sign in and confirm the same code; with
-`--no-browser`, as over SSH, it shows the page's address for you to open elsewhere. `runner register` writes the
-machine's settings to `~/.config/sc2scala/runner.toml`: how many matches it plays at once, 1 at first, with how many fit
+The code works once, within an hour, and needs no sign-in on the machine. The machine takes its host name as its name,
+unless you give one after `register`; if you have a machine of that name already, `--replace` makes it this one, as
+when you set it up again. Signed in instead, by `sc2scala login https://scala.example.org`, `runner register NAME`
+registers it too, serving every public ladder and the ladders given with `--ladders`. `login` shows a code and opens
+the server's page in your browser, where you sign in and confirm the same code; with `--no-browser`, as over SSH, it
+shows the page's address for you to open elsewhere. A computer is one machine: `sc2scala runner remove`, with no name,
+removes it from the server, by its own token, before it registers anew.
+
+`runner register` writes the machine's settings to `~/.config/sc2scala/runner.toml`: how many matches it plays at
+once, 1 at first, with how many fit
 this machine in a comment; how many GiB of bots and maps it keeps, 20; and the weekly windows in which it plays, at any
 hour at first, with an example of nights and weekends. `runner start` reads them, downloads the engine's images first if
 Docker lacks them, about 11 GB, and plays. It keeps bots and maps in `~/.cache/sc2scala`, plays each match in

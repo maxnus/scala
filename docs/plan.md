@@ -306,12 +306,12 @@ Each step ends in something that runs, and is a pull request of its own.
    - 7b, done: the owner's VPS serves the first ladder, by the guide, which its install corrected, since 2026-10-31:
      at an sslip.io name, with the owner's GitHub app, beside another site behind the same Caddy, with a copy of its
      database each night on the VPS itself. Copying the copies and the files off the VPS is not set up yet.
-   - 7c: adding a runner by one command, as [above](#adding-a-runner), in two pull requests: first the setup codes,
-     *Add a runner*, registering by a code, which the CLI's `runner register --setup-code` uses too, and a machine
-     removing itself by its token; then the script, tested in fresh Ubuntu 24.04 and 26.04 VMs under KVM on max-9950,
-     from nothing to a runner that plays a match on the public server, and then on max-9950 itself, which plays
-     test-ladder's first matches. The guides, [the sandbox](sandbox.md) and [WSL2](wsl2.md), then send people to the
-     command, and keep the steps by hand for the rest.
+   - 7c: adding a runner by one command, as [above](#adding-a-runner), in two pull requests: first, done, the setup
+     codes, *Add a runner*, registering by a code, which the CLI's `runner register --setup-code` uses too, and a
+     machine removing itself by its token, `runner remove` with no name; then the script, tested in fresh Ubuntu 24.04
+     and 26.04 VMs under KVM on max-9950, from nothing to a runner that plays a match on the public server, and then
+     on max-9950 itself, which plays test-ladder's first matches. The guides, [the sandbox](sandbox.md) and
+     [WSL2](wsl2.md), then send people to the command, and keep the steps by hand for the rest.
 
 ## Open
 

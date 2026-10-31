@@ -43,6 +43,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.8",
     "pyright>=1.1.390",
+    "shellcheck-py>=0.10",
 ]
 
 [build-system]

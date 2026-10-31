@@ -73,68 +73,17 @@ so these fit 3. `instanceIdleTimeout=-1` keeps WSL from stopping the distributio
 closes, and the virtual machine stops only once no distribution runs. Run `wsl --shutdown` for the file to take effect;
 it stops the runner too, and voids the matches it was playing.
 
-## 4. Install Docker inside Ubuntu
+## 4. Set up the runner
 
-Install Docker Engine and Compose in the distribution, as on Ubuntu itself, rather than Docker Desktop. If Docker
-Desktop is installed, first turn off its WSL integration for Ubuntu-24.04, in its Settings > Resources > WSL
-integration, so that its `docker` does not take the place of this one:
+In Ubuntu, run the command that the server's *Add a runner* page gives, opened in the Windows browser, as the
+[README](../README.md#contributing-a-runner) says. It installs Docker and what rootless Docker needs, makes the user
+`sc2scala` with rootless Docker, registers the machine, under the computer's name, and starts the runner as that user's
+service, which runs whenever the distribution does. Docker Desktop is not needed: if it is installed, first turn off
+its WSL integration for Ubuntu-24.04, in its Settings > Resources > WSL integration, so that its `docker` does not take
+the place of the distribution's own. The runner's log is `sudo journalctl _SYSTEMD_USER_UNIT=sc2scala-runner.service
+--follow`.
 
-```bash
-sudo apt update
-sudo apt install docker.io docker-compose-v2
-sudo usermod -aG docker $USER
-```
-
-Close every Ubuntu window and run `wsl --terminate Ubuntu-24.04` for the group to take effect, then check, in Ubuntu,
-that Docker runs, that Compose is 2.20 or later, and that Docker runs on cgroup v2 with the CPU, memory and process
-limits the sandbox needs:
-
-```bash
-docker run --rm hello-world
-docker compose version
-docker info --format '{{.CgroupVersion}}'
-cat /sys/fs/cgroup/cgroup.controllers
-```
-
-The third prints `2`, and the fourth lists `cpu`, `memory` and `pids`. WSL mounts cgroup v2 unless `/etc/wsl.conf`
-asks for v1.
-
-Docker Desktop runs its containers in a distribution of its own; Scala has not been tried with it.
-
-## 5. Install Scala and register the runner
-
-As on Linux, in Ubuntu, and in Ubuntu's own file system, under `~`, rather than under `/mnt/c`, which is far slower.
-The repository is private for now, so cloning it needs a GitHub account with access to it, signed in with `gh`:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.local/bin/env
-sudo apt install gh
-gh auth login
-gh repo clone maxnus/scala ~/scala
-cd ~/scala
-uv sync
-uv run sc2scala runner register --server https://scala.example.org --setup-code scala_setup_...
-```
-
-The setup code comes from the server's *Add a runner* page, opened in the Windows browser, which makes one for the
-ladders you tick; the machine takes the computer's name. `runner register` suggests how many runners fit what WSL was
-given in step 3, and writes the runner's settings, `~/.config/sc2scala/runner.toml`, as the
-[README](../README.md#contributing-a-runner) says.
-
-## 6. Run the runner as a service
-
-```bash
-uv run sc2scala runner service
-systemctl --user daemon-reload
-systemctl --user enable --now sc2scala-runner
-sudo loginctl enable-linger $USER
-```
-
-The last line starts the user's services whenever the distribution starts, with no Ubuntu window open. Its log is
-`journalctl --user --unit sc2scala-runner --follow`.
-
-## 7. Keep the distribution running
+## 5. Keep the distribution running
 
 WSL stops a distribution once no Windows program uses it, even with systemd services running in it, and the idle
 settings of step 3 do not always prevent it. A program that never ends keeps it running: a task that starts one when
@@ -152,17 +101,17 @@ Register-ScheduledTask -TaskName "Keep WSL running for sc2scala" -Action $action
 Once you log on, `wsl --list --running` lists Ubuntu-24.04, and the runner starts with it. The task runs only while you
 are logged on; one that starts at boot, with nobody logged on, is not covered here.
 
-## 8. Mind sleep and updates
+## 6. Mind sleep and updates
 
 While Windows sleeps, the runner pauses, and a match it was playing is void if it cannot report by its deadline, the
 ladder's real-time limit and 15 minutes after the match was drawn; the next match is drawn afresh, so nothing is lost
 but that match. Set the runner's windows in `runner.toml` to the hours the machine is awake, or keep it from sleeping
 then, in Settings > System > Power, or Power & battery on a laptop. A restart for Windows Update stops the runner and
-voids its matches, and the task of step 7 starts it again at the next logon.
+voids its matches, and the task of step 5 starts it again at the next logon.
 
-## A runner of its own
+## By hand
 
-A runner that plays strangers' bots should run as a user of its own, with rootless Docker, as
-[the sandbox](sandbox.md#a-runner-of-its-own-with-rootless-docker) says for Linux. In WSL2, the same steps should work
-inside the distribution, with step 6 run as that user, whose lingering services the task of step 7 keeps running with
-the distribution; they have not been tried there.
+On a distribution the setup script does not take, follow the steps of
+[the sandbox](sandbox.md#a-runner-of-its-own-with-rootless-docker) inside it, by which the runner runs as a user of its
+own, with rootless Docker, whose lingering services the task of step 5 keeps running with the distribution. They have
+not been tried in WSL2.

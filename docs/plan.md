@@ -208,7 +208,9 @@ command does the rest.
      the 15 GiB one match may take under a ladder's default limits and the system beside it; and 50 GB free where the
      user's home will be, `/home`, 28 for the images once unpacked and 20 for the runner's cache;
    - installs what is missing of Docker, Compose and what rootless Docker needs, from Ubuntu's packages, or Docker's
-     own rootless extras where Docker's packages are installed;
+     own rootless extras where Docker's packages are installed; Ubuntu 24.04's docker.io lacks Docker's two rootless
+     scripts, which 26.04's ships, so the script downloads them from Docker's repository at the same version, checked
+     against their SHA-256, byte for byte 26.04's;
    - makes the user `sc2scala`, whose services run while nobody is logged in, and marks it as the script's;
    - as that user, sets up rootless Docker, and checks what the sandbox needs: that Docker reports `rootless`, and
      that the user may limit CPU, memory and processes; a failed check stops it;
@@ -249,7 +251,9 @@ hand on another Linux. Two other ways were weighed and left out:
   which is root's, so a bot that broke out would own the machine.
 
 Scala comes from PyPI once it is published there, which needs the license and a public repository. Until then the
-script takes a wheel, by `SC2SCALA_PACKAGE`, a path or an address, so that the owner's machines test it first.
+script takes a wheel, by `SC2SCALA_PACKAGE`, a path or an address, so that the owner's machines test it first, and
+installs nothing without one: the name `sc2scala` is free on PyPI, and a stranger's package of that name would run as
+the runner's user.
 
 ### The server
 
@@ -308,10 +312,12 @@ Each step ends in something that runs, and is a pull request of its own.
      database each night on the VPS itself. Copying the copies and the files off the VPS is not set up yet.
    - 7c: adding a runner by one command, as [above](#adding-a-runner), in two pull requests: first, done, the setup
      codes, *Add a runner*, registering by a code, which the CLI's `runner register --setup-code` uses too, and a
-     machine removing itself by its token, `runner remove` with no name; then the script, tested in fresh Ubuntu 24.04
-     and 26.04 VMs under KVM on max-9950, from nothing to a runner that plays a match on the public server, and then
-     on max-9950 itself, which plays test-ladder's first matches. The guides, [the sandbox](sandbox.md) and
-     [WSL2](wsl2.md), then send people to the command, and keep the steps by hand for the rest.
+     machine removing itself by its token, `runner remove` with no name; then, done, the script, `runner pull`, and
+     `tools/try_runner_setup.py`, which tried it in fresh Ubuntu 24.04 and 26.04 VMs under KVM on max-9950, each from
+     nothing to a runner that played a match, against a server of the branch rather than the public one, and then
+     updated and removed it. The guides, [the sandbox](sandbox.md) and [WSL2](wsl2.md), send people to the command,
+     and keep the steps by hand for the rest. Left: max-9950 itself, on the public server, playing test-ladder's first
+     matches.
 
 ## Open
 

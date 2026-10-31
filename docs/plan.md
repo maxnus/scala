@@ -45,6 +45,9 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
    7a): one process, with a few runners reporting a result every few minutes, is well within it.
 10. **A bot or a ladder is deleted only if it never played**, and its name is free again; one that played is retired
     instead, so that every match keeps its players and its ladder (the owner, 2026-10-31, for step 7a).
+11. **Adding a runner is about one command**, since contributors add runners to ladders that are not theirs (the
+    owner, 2026-10-31, for step 7c, finding [the sandbox](sandbox.md)'s steps by hand, a dozen commands with sudo
+    among them, far too many).
 
 ## Design
 
@@ -132,9 +135,10 @@ ladder's page also shows each pair's record.
 
 A machine contributes runners: it plays as many matches at once as it has runners, each a thread of one
 `sc2scala runner start`, which runs as a service, systemd's on Linux and in WSL2, which runs systemd too. The ladders it
-serves are the server's to know, set by `sc2scala runner register` and `runner set`. How many runners it has, how much
-disk its cache may take, and the weekly windows in which it plays, in its own time zone, are its own, in a file beside
-its token that `runner register` writes with the defaults:
+serves are the server's to know, set by `sc2scala runner register`, `runner set` and the pages, and
+[the setup command](#adding-a-runner) does all of it in one. How many runners it has, how much disk its cache may take,
+and the weekly windows in which it plays, in its own time zone, are its own, in a file beside its token that `runner
+register` writes with the defaults:
 
 ```toml
 # ~/.config/sc2scala/runner.toml
@@ -179,6 +183,61 @@ A runner executes strangers' code, so every match runs sandboxed, as [the sandbo
 
 A runner that plays strangers' bots runs as a user of its own, with rootless Docker, so that a bot that breaks out
 lands as a user who owns nothing of its owner's.
+
+### Adding a runner
+
+A contributor adds a runner as one adds a self-hosted runner to GitHub: a page gives them a command to paste, and the
+command does the rest.
+
+1. **On the pages.** *Add a runner*, on one's account page and on the page of each ladder one may serve, asks which
+   ladders the machine serves: every public ladder, ticked at first, and each protected ladder one is a member of,
+   the ladder whose page it came from ticked too. It answers with a setup code, which works once, within an hour, and
+   with the command that uses it:
+
+   ```bash
+   curl -fsSL https://scala.example.org/runner/setup.sh | sudo bash -s -- SETUP-CODE
+   ```
+
+   and the same in three lines that download the script, show it, and run it, for those who read a script before
+   running it as root.
+
+2. **The script**, which the server serves with its own address filled in, and which says what it does at each step:
+   - checks the machine first, and stops with the reason: run as root, x86-64, `apt` and systemd, as Ubuntu and
+     Debian have, and Ubuntu in WSL2 with systemd on, untested until a Windows machine tries it; 8 GiB of memory, for
+     one runner; and 50 GB free, 28 for the images once unpacked and 20 for the runner's cache;
+   - installs what is missing of Docker, Compose and what rootless Docker needs, from Ubuntu's packages, or Docker's
+     own rootless extras where Docker's packages are installed;
+   - makes the user `sc2scala`, whose services run while nobody is logged in;
+   - as that user, sets up rootless Docker, and checks what the sandbox needs: that Docker reports `rootless`, and
+     that the user may limit CPU, memory and processes; a failed check stops it;
+   - installs uv and Scala for that user;
+   - registers the machine by the setup code, under the machine's host name, which `--name` changes, with as many
+     runners as the machine's cores and memory suggest;
+   - downloads AI Arena's images, about 11 GB, showing its progress, and then starts the runner's service;
+   - ends by naming the machine, its owner, the ladders it serves, and the page that shows it.
+
+   Run again, the script updates Scala and keeps the registration, with no setup code. `--remove` removes the
+   machine from the server, by its own token, and from the computer: the service, the user, and its Docker's images.
+
+3. **Afterwards**, everything is in the pages, as since step 6b: the ladders a machine serves, and removing it. Its
+   number of runners and its windows stay in `runner.toml`, as the guides say.
+
+On the server, a setup code is kept as its hash, with its user, its ladders and when it expires, as a login request
+is. Exchanging it for a machine takes no other token, and gives the machine's token, once; a machine of the user's of
+the same name gets the new token and the code's ladders, so that a reinstalled computer keeps its machine and its
+matches. The code shows in
+the shell's history and the process list while the script runs, which its single use and its hour bound.
+
+The script refuses what it does not know, and points to [the sandbox](sandbox.md)'s steps, which stay, for doing it by
+hand on another Linux. Two other ways were weighed and left out:
+
+- **A runner as one's own user, with no sudo**: a bot that broke out of its container would land as the contributor,
+  with their files.
+- **A runner shipped as a Docker image**: it would need the host's Docker socket to start the match's containers,
+  which is root's, so a bot that broke out would own the machine.
+
+Scala comes from PyPI once it is published there, which needs the license and a public repository. Until then the
+script takes a wheel, by `SC2SCALA_PACKAGE`, a path or an address, so that the owner's machines test it first.
 
 ### The server
 
@@ -235,12 +294,20 @@ Each step ends in something that runs, and is a pull request of its own.
    - 7b, done: the owner's VPS serves the first ladder, by the guide, which its install corrected, since 2026-10-31:
      at an sslip.io name, with the owner's GitHub app, beside another site behind the same Caddy, with a copy of its
      database each night on the VPS itself. Copying the copies and the files off the VPS is not set up yet.
-   - 7c: adding a runner, which takes a dozen commands and sudo by [the sandbox](sandbox.md)'s steps, made about one
-     command, planned in a pull request of its own. Its first runner is max-9950, as a user of its own.
+   - 7c: adding a runner by one command, as [above](#adding-a-runner), in two pull requests: first the setup codes,
+     *Add a runner*, registering by a code, which the CLI's `runner register --setup-code` uses too, and a machine
+     removing itself by its token; then the script, tested in fresh Ubuntu 24.04 and 26.04 VMs under KVM on max-9950,
+     from nothing to a runner that plays a match on the public server, and then on max-9950 itself, which plays
+     test-ladder's first matches. The guides, [the sandbox](sandbox.md) and [WSL2](wsl2.md), then send people to the
+     command, and keep the steps by hand for the rest.
 
 ## Open
 
-- **The license.** NachOS is MIT. The engine is GPL-3.0, and Scala only runs its images, as separate programs.
+- **The license.** NachOS is MIT. The engine is GPL-3.0, and Scala only runs its images, as separate programs. It is
+  needed before Scala goes on PyPI, from which strangers' runners install it.
+- **Updating runners**: running the setup command again updates one. The server could tell a runner that its Scala is
+  too old for it, once a change needs every runner updated.
+- **Other Linux distributions** for the setup script, once someone asks: Fedora and Arch have rootless Docker too.
 - **What a bot keeps between games**, as AI Arena's `data` folder: left out. With it, a bot plays one match at a time.
 - **Checking a result against its replay**, against a runner that reports falsely.
 - **Matchmaking beyond random**: the prototype compares random pairing with round-robin, rung and a stochastic

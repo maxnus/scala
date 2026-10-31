@@ -10,7 +10,8 @@ the tunnel, until Ctrl-C, and the tool prints how to reach it by SSH, as to run 
 
 It downloads the release's cloud image once, checked against Ubuntu's SHA256SUMS, into the VMs' folder, where each VM
 gets a disk of its own on top of it. It needs qemu-system-x86_64, qemu-img, ssh and /dev/kvm. A runner needs 16 GiB, so
-the VM gets that, 6 processors and an 80 GB disk, which grows as it fills: the game's images take 28 GB.
+the VM gets that, 6 processors and an 80 GB disk, which grows as it fills: the game's images take 28 GB. Each VM's SSH
+is forwarded to a free port of 127.0.0.1, so that VMs may run side by side.
 """
 
 import argparse
@@ -18,6 +19,7 @@ import hashlib
 import http.server
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -32,7 +34,6 @@ from urllib.parse import urlsplit
 _CLOUD_IMAGES = "https://cloud-images.ubuntu.com/releases/{release}/release"
 _IMAGE_NAME = "ubuntu-{release}-server-cloudimg-amd64.img"
 _DEFAULT_VMS_FOLDER = Path.home() / ".cache" / "sc2scala-vm-tests"
-_SSH_PORT = 2222
 _VM_USER = "ubuntu"
 _BOOT_SECONDS = 300
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -66,27 +67,31 @@ def main() -> None:
     key = vm_folder / "ssh_key"
     run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)])
     seed_url, seed_server = serve_cloud_init(vm_folder, args.release, key.with_suffix(".pub").read_text().strip())
-    with subprocess.Popen(qemu_command(args, disk, seed_url, vm_folder / "console.log")) as vm:
+    ssh_port = free_port()
+    with subprocess.Popen(qemu_command(args, disk, seed_url, vm_folder / "console.log", ssh_port)) as vm:
+        tunnel: subprocess.Popen[bytes] | None = None
         try:
             print(f"Booting Ubuntu {args.release} in {vm_folder}; its console goes to console.log")
-            ssh = SshToVm(key)
+            ssh = SshToVm(key, ssh_port)
             ssh.wait_for_boot()
             seed_server.shutdown()
             print(f"Ubuntu {args.release} is up. Reach it by:\n  {' '.join(ssh.command())}")
             tunnel_options = ["-N", "-R", f"{server.port}:127.0.0.1:{server.port}"]
-            with subprocess.Popen(ssh.command(ssh_options=tunnel_options)) as tunnel:
-                ssh.copy_in(args.wheel)
-                if args.setup_code:
-                    setup = setup_command(args.server_url, args.wheel.name, args.setup_code)
-                    print(f"Running, in the VM: {setup}\n")
-                    finished = subprocess.run(ssh.command(setup), check=False)
-                    print(f"\nThe setup script ended with {finished.returncode}")
-                print("The VM and its tunnel keep running until Ctrl-C")
-                vm.wait()
-                tunnel.terminate()
+            tunnel = subprocess.Popen(ssh.command(ssh_options=tunnel_options))
+            ssh.copy_in(args.wheel)
+            if args.setup_code:
+                setup = setup_command(args.server_url, args.wheel.name, args.setup_code)
+                print(f"Running, in the VM: {setup}\n")
+                finished = subprocess.run(ssh.command(setup), check=False)
+                print(f"\nThe setup script ended with {finished.returncode}")
+            print("The VM and its tunnel keep running until Ctrl-C")
+            vm.wait()
         except KeyboardInterrupt:
             print("\nStopping the VM")
         finally:
+            if tunnel is not None:
+                tunnel.terminate()
+                tunnel.wait()
             vm.terminate()
 
 
@@ -137,7 +142,14 @@ def serve_cloud_init(vm_folder: Path, release: str, public_key: str) -> tuple[st
     return f"http://10.0.2.2:{seed_server.server_address[1]}/", seed_server
 
 
-def qemu_command(args: argparse.Namespace, disk: Path, seed_url: str, console_log: Path) -> list[str]:
+def free_port() -> int:
+    """A port of 127.0.0.1 that nothing listens on now."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def qemu_command(args: argparse.Namespace, disk: Path, seed_url: str, console_log: Path, ssh_port: int) -> list[str]:
     return [
         "qemu-system-x86_64",
         "-enable-kvm",
@@ -150,7 +162,7 @@ def qemu_command(args: argparse.Namespace, disk: Path, seed_url: str, console_lo
         "-drive",
         f"file={disk},if=virtio",
         "-netdev",
-        f"user,id=net0,hostfwd=tcp:127.0.0.1:{_SSH_PORT}-:22",
+        f"user,id=net0,hostfwd=tcp:127.0.0.1:{ssh_port}-:22",
         "-device",
         "virtio-net-pci,netdev=net0",
         "-smbios",
@@ -169,9 +181,10 @@ def setup_command(server_url: str, wheel_name: str, setup_code: str) -> str:
 
 
 class SshToVm:
-    """SSH and SCP to the VM's user, by the VM's own key, on the forwarded port."""
+    """SSH and SCP to the VM's user, by the VM's own key, on the port forwarded to its SSH."""
 
-    def __init__(self, key: Path) -> None:
+    def __init__(self, key: Path, port: int) -> None:
+        self._port = port
         self._options = [
             "-i",
             str(key),
@@ -187,10 +200,10 @@ class SshToVm:
 
     def command(self, *remote: str, ssh_options: Sequence[str] = ()) -> list[str]:
         """SSH to the VM running `remote`, or a shell if none, with `ssh_options` besides the key's."""
-        return ["ssh", *self._options, *ssh_options, "-p", str(_SSH_PORT), f"{_VM_USER}@127.0.0.1", *remote]
+        return ["ssh", *self._options, *ssh_options, "-p", str(self._port), f"{_VM_USER}@127.0.0.1", *remote]
 
     def copy_in(self, local_file: Path) -> None:
-        run(["scp", *self._options, "-P", str(_SSH_PORT), str(local_file), f"{_VM_USER}@127.0.0.1:"])
+        run(["scp", *self._options, "-P", str(self._port), str(local_file), f"{_VM_USER}@127.0.0.1:"])
 
     def wait_for_boot(self) -> None:
         """Waits until the VM answers by SSH and cloud-init is done; exits if it does not within 5 minutes."""

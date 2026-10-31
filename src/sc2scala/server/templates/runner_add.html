@@ -20,7 +20,12 @@
         your machines has that name, when this computer is that machine set up again. Scala is not on PyPI yet, so
         the script installs the wheel given as <code>sudo SC2SCALA_PACKAGE=/path/to/sc2scala.whl bash</code>.
       </p>
-      <p>To read the script before it runs as root, check it against its SHA-256, and run it:</p>
+      <p>
+        To read the script before it runs as root, check it against its SHA-256, and run it. The hash is of Scala's
+        <code>src/sc2scala/server/runner_setup.sh</code> with this server's address,
+        <code>{{ request.app.state.config.public_url }}</code>, in place of <code>__SCALA_SERVER__</code>, which
+        anyone may check against the repository rather than this page:
+      </p>
       <pre>curl -fsSLo setup.sh {{ setup_script_url }}
 echo "{{ setup_script_sha256 }}  setup.sh" | sha256sum --check
 sudo bash setup.sh {{ code }}</pre>

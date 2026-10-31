@@ -5,11 +5,10 @@ A signed-in user asks the page for a code, saying which ladders the machine is t
 for itself and its token, by `sc2scala runner register --setup-code`, with no other token. So a code is as random as a
 token, kept as its hash, works once, and only for an hour. The setup script, `runner_setup.sh`, runs that command and
 everything around it, as root; the server serves it as the package holds it, with its own address filled in, and the
-page shows its SHA-256, so that whoever runs it may check it is the repository's.
+page shows its SHA-256, which whoever runs it may compare with that of the repository's file with the same address.
 """
 
 import hashlib
-import re
 from datetime import timedelta
 from importlib.resources import files
 from typing import Annotated, Any, cast
@@ -33,6 +32,7 @@ from sc2scala.server.runners_api import (
     new_machine,
     void_leased_matches,
 )
+from sc2scala.server.server_config import SHELL_SAFE_URL
 from sc2scala.server.web import DatabaseSession, check_csrf, refusal_reason, render, required_user
 
 router = APIRouter()
@@ -44,9 +44,7 @@ _ADD_RUNNER_PAGE = "/runners/add"
 _NO_SUCH_CODE = "No setup code like that waits: it was used already, or expired; make another on the Add a runner page"
 SETUP_SCRIPT_PATH = "/runner/setup.sh"
 _SETUP_SCRIPT_FILE = "runner_setup.sh"
-_SERVER_PLACEHOLDER = "__SCALA_SERVER__"
-_SHELL_SAFE_SERVER_URL = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?")
-"""An address that is nothing more in the shell script's double quotes: no quote, `$`, backquote or backslash."""
+SERVER_PLACEHOLDER = "__SCALA_SERVER__"
 
 SignedInUser = Annotated[User, Depends(required_user)]
 
@@ -136,11 +134,11 @@ def setup_script_route(request: Request) -> Response:
 
 def setup_script(public_url: str) -> str:
     """The setup script as the package holds it, with `public_url` filled in; raises `ValueError` for an address that
-    could be more than an address in the script."""
-    if not _SHELL_SAFE_SERVER_URL.fullmatch(public_url):
+    could be more than an address in the script, which a server's config refuses as it starts."""
+    if not SHELL_SAFE_URL.fullmatch(public_url):
         raise ValueError(f"{public_url!r} is not an address the setup script may hold")
     script = files("sc2scala.server").joinpath(_SETUP_SCRIPT_FILE).read_text(encoding="utf-8")
-    return script.replace(_SERVER_PLACEHOLDER, public_url)
+    return script.replace(SERVER_PLACEHOLDER, public_url)
 
 
 def _render_form(

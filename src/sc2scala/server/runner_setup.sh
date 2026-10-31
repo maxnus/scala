@@ -120,17 +120,18 @@ check_machine() {
 		fail "This script knows Ubuntu $UBUNTU and later alone, not ${PRETTY_NAME:-this system}: Scala's guide to the sandbox says how to set a runner up by hand"
 	fi
 	[ -d /run/systemd/system ] || fail "systemd does not run here; in WSL2, turn it on as Scala's WSL2 guide says"
-	local memory_kib
+	local memory_kib memory_gib
 	memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+	memory_gib="$(awk -v kib="$memory_kib" 'BEGIN {printf "%.1f", kib / 1048576}')"
 	if [ "$memory_kib" -lt $((MEMORY_GIB * 1024 * 1024 - MOST_MEMORY_MISSING_KIB)) ]; then
-		fail "A runner needs $MEMORY_GIB GiB of memory, for the 15 GiB one match may take under a ladder's default limits; this computer has $((memory_kib / 1024 / 1024)) GiB"
+		fail "A runner needs a machine of $MEMORY_GIB GiB, for the 15 GiB one match may take under a ladder's default limits; this one's kernel has $memory_gib GiB"
 	fi
 	if ! registered 2>/dev/null; then
 		local free_gb
 		free_gb="$(df -BG --output=avail /home | tail -1 | tr -dc '0-9')"
 		[ "$free_gb" -ge "$FREE_GB" ] || fail "A runner needs $FREE_GB GB free in /home, 28 for the game's images and 20 for its cache; /home has $free_gb GB"
 	fi
-	note "$PRETTY_NAME, $(uname -m), $((memory_kib / 1024 / 1024)) GiB of memory"
+	note "$PRETTY_NAME, $(uname -m), $memory_gib GiB of memory as the kernel counts it"
 }
 
 install_packages() {
@@ -152,8 +153,9 @@ install_packages() {
 	local docker_was_installed=""
 	is_installed docker.io && docker_was_installed=yes
 	note "Installing ${missing[*]}"
-	apt-get update -qq
-	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
+	# Waits for the lock that the daily upgrades, or a fresh machine's first, may hold.
+	apt-get -o DPkg::Lock::Timeout=600 update -qq
+	DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -qq "${missing[@]}" >/dev/null
 	if [ -z "$docker_was_installed" ] && is_installed docker.io; then
 		# Ubuntu's package starts Docker's daemon as root, which a rootless runner does not need.
 		systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
@@ -186,37 +188,38 @@ make_user() {
 
 add_rootless_scripts() {
 	# Docker's setup tool looks for docker beside itself. Docker's own packages keep both in /usr/bin; Ubuntu's docker.io
-	# keeps its rootless scripts apart, or, in 24.04, lacks them, so a folder of this script's own holds them, linked,
-	# or downloaded and checked, beside a link to docker.
+	# keeps its rootless scripts apart, or, in 24.04, lacks them, so a folder of this script's own holds them beside a
+	# link to docker: linked to the package's whenever it has them, or else downloaded and checked.
 	[ ! -x /usr/bin/dockerd-rootless-setuptool.sh ] || return 0
-	if [ ! -x "$ROOTLESS_SCRIPTS_FOLDER/dockerd-rootless-setuptool.sh" ]; then
-		install -d -m 755 "$ROOTLESS_SCRIPTS_FOLDER"
-		if [ -x "$DOCKER_CONTRIB/dockerd-rootless-setuptool.sh" ]; then
+	install -d -m 755 "$ROOTLESS_SCRIPTS_FOLDER"
+	if [ -x "$DOCKER_CONTRIB/dockerd-rootless-setuptool.sh" ]; then
+		if [ "$(readlink "$ROOTLESS_SCRIPTS_FOLDER/dockerd-rootless-setuptool.sh")" != "$DOCKER_CONTRIB/dockerd-rootless-setuptool.sh" ]; then
 			ln -sf "$DOCKER_CONTRIB/dockerd-rootless.sh" "$DOCKER_CONTRIB/dockerd-rootless-setuptool.sh" \
 				"$ROOTLESS_SCRIPTS_FOLDER/"
 			note "Linked docker.io's rootless scripts into $ROOTLESS_SCRIPTS_FOLDER"
-		else
-			local download line
-			download="$(mktemp -d)"
-			for line in "${ROOTLESS_SCRIPT_HASHES[@]}"; do
-				curl -fsSL -o "$download/${line##* }" "$ROOTLESS_SCRIPTS_URL/${line##* }"
-			done
-			(cd "$download" && printf '%s\n' "${ROOTLESS_SCRIPT_HASHES[@]}" | sha256sum --check --quiet) ||
-				fail "Docker's rootless scripts from $ROOTLESS_SCRIPTS_URL do not match their SHA-256"
-			install -m 755 "$download"/*.sh "$ROOTLESS_SCRIPTS_FOLDER/"
-			rm -rf "$download"
-			note "Added Docker's rootless scripts, which this docker.io lacks, to $ROOTLESS_SCRIPTS_FOLDER"
 		fi
+	elif [ ! -x "$ROOTLESS_SCRIPTS_FOLDER/dockerd-rootless-setuptool.sh" ]; then
+		local download line
+		download="$(mktemp -d)"
+		for line in "${ROOTLESS_SCRIPT_HASHES[@]}"; do
+			curl -fsSL -o "$download/${line##* }" "$ROOTLESS_SCRIPTS_URL/${line##* }"
+		done
+		(cd "$download" && printf '%s\n' "${ROOTLESS_SCRIPT_HASHES[@]}" | sha256sum --check --quiet) ||
+			fail "Docker's rootless scripts from $ROOTLESS_SCRIPTS_URL do not match their SHA-256"
+		install -m 755 "$download"/*.sh "$ROOTLESS_SCRIPTS_FOLDER/"
+		rm -rf "$download"
+		note "Added Docker's rootless scripts, which this docker.io lacks, to $ROOTLESS_SCRIPTS_FOLDER"
 	fi
 	ln -sf "$(command -v docker)" "$ROOTLESS_SCRIPTS_FOLDER/docker"
 }
 
 check_apparmor() {
 	# Where the kernel restricts unprivileged user namespaces, as Ubuntu's does, rootlesskit needs an AppArmor profile
-	# that allows them, which Ubuntu's apparmor package ships, 24.04's among them.
+	# that allows them, which Ubuntu's apparmor package ships, 24.04's among them; a profile in /etc/apparmor.d, but not
+	# in its disable folder, is loaded as the system starts.
 	local restricted=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
 	[ -r "$restricted" ] && [ "$(cat "$restricted")" = 1 ] || return 0
-	grep -rlsq ' /usr/bin/rootlesskit ' /etc/apparmor.d ||
+	grep -rlsqE --exclude-dir=disable '^[^#]*[[:space:]]/usr/bin/rootlesskit[[:space:]]' /etc/apparmor.d ||
 		fail "The kernel restricts user namespaces, and no AppArmor profile lets rootlesskit make them, as Ubuntu's apparmor package's does: apt-get install --only-upgrade apparmor"
 }
 
@@ -249,7 +252,12 @@ set_up_docker() {
 
 install_scala() {
 	say "Installing Scala for $RUNNER_USER"
-	[ -n "$PACKAGE" ] || fail "Scala is not on PyPI yet: give its wheel, as sudo SC2SCALA_PACKAGE=/path/to/sc2scala.whl bash ..."
+	if [ -z "$PACKAGE" ]; then
+		as_runner test -x .local/bin/sc2scala ||
+			fail "Scala is not on PyPI yet: give its wheel, as sudo SC2SCALA_PACKAGE=/path/to/sc2scala.whl bash ..."
+		note "Kept $(as_runner .local/bin/uv tool list | grep '^sc2scala '): Scala is not on PyPI yet, so SC2SCALA_PACKAGE updates it"
+		return
+	fi
 	if ! as_runner test -x .local/bin/uv; then
 		as_runner sh -c 'curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh' >/dev/null
 		note "Installed uv"

@@ -62,9 +62,11 @@ def draw_match(
 
 def served_ladders(session: Session, machine: RunnerMachine) -> list[Ladder]:
     """The ladders `machine` serves: every public one if it serves them, and those it lists, a protected one while its
-    owner is a member; none that barred it."""
+    owner is a member; none that barred it, or is retired."""
     ladders = session.scalars(
-        select(Ladder).options(
+        select(Ladder)
+        .where(Ladder.retired_at.is_(None))
+        .options(
             selectinload(Ladder.maps),
             selectinload(Ladder.members),
             selectinload(Ladder.barred_runners),

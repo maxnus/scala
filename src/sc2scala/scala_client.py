@@ -64,6 +64,10 @@ class ScalaClient:
     def bot(self, name: str) -> dict[str, Any]:
         return self._request("GET", f"/api/bots/{name}")
 
+    def remove_bot(self, name: str) -> dict[str, Any]:
+        """Deletes the user's bot if it never played, or else retires it; the answer's `outcome` says which."""
+        return self._request("DELETE", f"/api/bots/{name}")
+
     def create_ladder(
         self, name: str, *, map_files: Sequence[Path], password: str | None, limits: dict[str, Any]
     ) -> dict[str, Any]:
@@ -86,6 +90,10 @@ class ScalaClient:
     ) -> dict[str, Any]:
         changes = {"new_password": new_password, "remove_password": remove_password, "limits": limits}
         return self._request("PATCH", f"/api/ladders/{name}", json=changes)
+
+    def remove_ladder(self, name: str) -> dict[str, Any]:
+        """Deletes the user's ladder if it never drew a match, or else retires it; the answer's `outcome` says which."""
+        return self._request("DELETE", f"/api/ladders/{name}")
 
     def add_map(self, ladder: str, map_file: Path) -> dict[str, Any]:
         with map_file.open("rb") as opened:

@@ -1,7 +1,8 @@
 {# Forms shared by pages: each posts with the session's form token and comes back to `next_page`. #}
 
 {% macro entry_actions(entry, user, csrf_token, next_page, may_withdraw) %}
-  {% if user and entry.bot.owner_id == user.id %}
+  {% if entry.ladder.retired_at %}
+  {% elif user and entry.bot.owner_id == user.id %}
     {% set action = "resume" if entry.paused else "pause" %}
     <form method="post" action="/ladders/{{ entry.ladder.name }}/entries/{{ entry.bot.name }}/{{ action }}" class="inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -9,7 +10,7 @@
       <button type="submit" class="link">{{ "Resume" if entry.paused else "Pause" }}</button>
     </form>
   {% endif %}
-  {% if may_withdraw %}
+  {% if may_withdraw and not entry.ladder.retired_at %}
     <form method="post" action="/ladders/{{ entry.ladder.name }}/entries/{{ entry.bot.name }}/withdraw" class="inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next_page" value="{{ next_page }}">

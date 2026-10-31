@@ -19,7 +19,7 @@
       <tbody>
         {% for bot in bots %}
           <tr>
-            <td><a href="/bots/{{ bot.name }}">{{ bot.name }}</a></td>
+            <td><a href="/bots/{{ bot.name }}">{{ bot.name }}</a>{% if bot.retired_at %} <span class="muted">retired</span>{% endif %}</td>
             <td>{{ bot.race }}</td>
             <td class="number">{{ bot.latest_version.number if bot.latest_version else "" }}</td>
           </tr>
@@ -38,6 +38,12 @@
     <button type="submit">Upload a new bot</button>
   </form>
   {{ zip_note() }}
+  {% if own_ladders %}
+    <h2>Your ladders</h2>
+    <p>
+      {% for ladder in own_ladders %}<a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>{% if ladder.retired_at %} <span class="muted">(retired)</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+  {% endif %}
   <h2>Your runner machines</h2>
   {% if machines %}
     <table>

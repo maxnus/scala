@@ -10,7 +10,7 @@ from sc2scala.race import Race
 from sc2scala.server.bots_api import bots_of
 from sc2scala.server.ladder_runners_api import barred_from
 from sc2scala.server.ladders_api import visible_ladders
-from sc2scala.server.models import ApiToken, RunnerMachine, User
+from sc2scala.server.models import ApiToken, Ladder, RunnerMachine, User
 from sc2scala.server.web import DatabaseSession, check_csrf, render, required_user
 
 router = APIRouter()
@@ -65,11 +65,13 @@ def _render_account(request: Request, session: Session, user: User, **context: A
         session.scalars(select(RunnerMachine).where(RunnerMachine.owner_id == user.id).order_by(RunnerMachine.name))
     )
     servable_ladders = visible_ladders(session, user)
+    own_ladders = list(session.scalars(select(Ladder).where(Ladder.owner_id == user.id).order_by(Ladder.name)))
     return render(
         request,
         "account.html",
         user=user,
         bots=bots,
+        own_ladders=own_ladders,
         machines=machines,
         barred_from={machine.id: barred_from(session, machine) for machine in machines},
         servable_ladders=servable_ladders,

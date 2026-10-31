@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Bots · Scala{% endblock %}
+{% block main %}
+  <h1>Bots</h1>
+  {% if user %}
+    <p><a class="button" href="/account">Upload a bot</a></p>
+  {% else %}
+    <p class="muted"><a href="/sign-in?next=%2Faccount">Sign in</a> to upload a bot.</p>
+  {% endif %}
+  {% if bots %}
+    <div class="scrolls">
+    <table>
+      <thead><tr><th>Bot</th><th>Author</th><th>Race</th><th class="number">Version</th><th>Uploaded</th></tr></thead>
+      <tbody>
+        {% for bot in bots %}
+          {% set latest = bot.latest_version %}
+          <tr>
+            <td><a href="/bots/{{ bot.name }}">{{ bot.name }}</a></td>
+            <td>{{ bot.owner.login }}</td>
+            <td>{{ bot.race }}</td>
+            <td class="number">{{ latest.number if latest else "" }}</td>
+            <td class="muted when">{{ latest.uploaded_at | when if latest else "" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p>No bot yet.</p>
+  {% endif %}
+{% endblock %}

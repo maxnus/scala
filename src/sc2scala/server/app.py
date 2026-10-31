@@ -38,6 +38,7 @@ from sc2scala.server.file_store import FileStore
 from sc2scala.server.github_accounts import GitHubAccounts
 from sc2scala.server.github_oauth_app import GitHubOAuthApp
 from sc2scala.server.server_config import ServerConfig
+from sc2scala.server.storage_tidying import StorageTidier
 from sc2scala.server.web import SignInRequired, render, signed_in_user
 
 _PACKAGE_FOLDER = Path(__file__).parent
@@ -48,18 +49,29 @@ _REFUSAL_TITLES = {403: "Not for you to see", 404: "Not found"}
 _STEPS_PER_GAME_SECOND = 22.4
 
 
-def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None = None) -> FastAPI:
+def create_app(
+    config: ServerConfig, *, github_accounts: GitHubAccounts | None = None, tidies_storage: bool = True
+) -> FastAPI:
     """The server's app, its database brought up to date.
 
-    People sign in with `github_accounts`, by default the OAuth app the config names, if it names one.
+    People sign in with `github_accounts`, by default the OAuth app the config names, if it names one. While it runs,
+    it tidies its storage every hour if `tidies_storage`, as `StorageTidier` says.
     """
     engine = create_database_engine(config.database_url)
     upgrade_database(engine)
+    file_store = FileStore(config.data_folder / _FILES_FOLDER_NAME)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        yield
-        engine.dispose()
+        tidier = StorageTidier(engine, file_store, keep_logs_days=config.keep_logs_days) if tidies_storage else None
+        if tidier is not None:
+            tidier.start()
+        try:
+            yield
+        finally:
+            if tidier is not None:
+                tidier.stop()
+            engine.dispose()
 
     app = FastAPI(title="Scala", version=__version__, lifespan=lifespan)
     app.state.config = config
@@ -67,7 +79,7 @@ def create_app(config: ServerConfig, *, github_accounts: GitHubAccounts | None =
     app.state.templates = Jinja2Templates(directory=_PACKAGE_FOLDER / "templates")
     app.state.templates.env.filters["when"] = _when
     app.state.templates.env.filters["game_time"] = _game_time
-    app.state.file_store = FileStore(config.data_folder / _FILES_FOLDER_NAME)
+    app.state.file_store = file_store
     app.state.match_random = random.SystemRandom()
     app.state.refit_lock = threading.Lock()
     if github_accounts is None and config.github_sign_in:

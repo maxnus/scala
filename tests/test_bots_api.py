@@ -27,7 +27,13 @@ def test_the_first_upload_makes_the_bot_and_its_first_version(server: TestClient
     alice = api_headers_of(server, "alice")
     uploaded = upload(server, alice, "basic_bot", PYTHON_BOT_ZIP)
     assert uploaded["status"] == 200
-    assert uploaded["bot"] == {"name": "basic_bot", "author": "alice", "race": "T", "latest_version": 1}
+    assert uploaded["bot"] == {
+        "name": "basic_bot",
+        "author": "alice",
+        "race": "T",
+        "latest_version": 1,
+        "retired_at": None,
+    }
     assert (uploaded["version"]["number"], uploaded["version"]["type"], uploaded["new"]) == (1, "python", True)
 
 

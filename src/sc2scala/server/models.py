@@ -93,7 +93,11 @@ class LoginRequest(Base):
 
 
 class BotRecord(Base):
-    """A bot on the server: its name, unique here in any case, its race, and its author."""
+    """A bot on the server: its name, unique here in any case, its race, and its author.
+
+    A bot that played is retired rather than deleted, at `retired_at`, so that its matches keep their players: it is in
+    no ladder, takes no version, and keeps its name.
+    """
 
     __tablename__ = "bots"
 
@@ -102,6 +106,7 @@ class BotRecord(Base):
     race: Mapped[str] = mapped_column(String(1))
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    retired_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     owner: Mapped[User] = relationship()
     versions: Mapped[list["BotVersion"]] = relationship(
@@ -155,7 +160,11 @@ ladder_maps = Table(
 
 class Ladder(Base):
     """A ladder: its name, unique here in any case, its owner, its password's hash if it has one, its maps, and the
-    limits of its matches, as `GameLimits` and `ResourceLimits` take them."""
+    limits of its matches, as `GameLimits` and `ResourceLimits` take them.
+
+    A ladder that played is retired rather than deleted, at `retired_at`: it draws no match and takes no entry, and
+    keeps its standings, matches and name.
+    """
 
     __tablename__ = "ladders"
 
@@ -166,6 +175,7 @@ class Ladder(Base):
     game_limits: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     resource_limits: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    retired_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     owner: Mapped[User] = relationship()
     maps: Mapped[list[MapFile]] = relationship(secondary=ladder_maps, order_by=MapFile.name)

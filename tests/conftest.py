@@ -63,7 +63,7 @@ def fake_github() -> FakeGitHub:
 @pytest.fixture
 def server(tmp_path: Path, fake_github: FakeGitHub) -> Iterator[TestClient]:
     """A server with the dev sign-in and the fake GitHub, on a database of its own, and a browser on it."""
-    app = create_app(server_config_in(tmp_path / "server"), github_accounts=fake_github)
+    app = create_app(server_config_in(tmp_path / "server"), github_accounts=fake_github, tidies_storage=False)
     with TestClient(app, base_url="http://localhost") as client:
         yield client
 

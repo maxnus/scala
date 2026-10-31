@@ -1,8 +1,12 @@
 import random
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from sc2scala.server.models import utc_now
+from sc2scala.server.storage_tidying import drop_old_logs
 from tests.conftest import sign_in_dev
 from tests.match_helpers import LadderWithBots, draw, ladder_with_bots, report
 
@@ -99,3 +103,23 @@ def test_a_page_not_found_is_a_page_and_the_apis_stays_json(ladder: LadderWithBo
     api = ladder.server.get("/api/ladders/nowhere", headers=ladder.alice)
     assert api.status_code == 404
     assert api.json() == {"detail": "No ladder is named nowhere"}
+
+
+def test_the_bots_page_lists_every_bot_and_the_header_leads_to_it(ladder: LadderWithBots) -> None:
+    page = ladder.server.get("/bots").text
+    assert '<a href="/bots/basic_bot">basic_bot</a>' in page and '<a href="/bots/bobs_bot">bobs_bot</a>' in page
+    assert '<a href="/bots" aria-current="page">Bots</a>' in page and '<a href="/">Ladders</a>' in page
+    assert '<a href="/" aria-current="page">Ladders</a>' in ladder.server.get("/ladders/league").text
+
+
+def test_a_matchs_logs_are_linked_while_they_are_kept(ladder: LadderWithBots) -> None:
+    match = play_one(ladder)
+    sign_in_dev(ladder.server, "alice")
+    page = ladder.server.get(f"/matches/{match['id']}").text
+    assert f'href="/matches/{match["id"]}/logs/engine"' in page
+    assert "A match's logs are kept 30 days once it ends" in page
+    with Session(ladder.server.app.state.engine) as session:  # type: ignore[attr-defined]
+        assert drop_old_logs(session, keep_logs_days=30, now=utc_now() + timedelta(days=31)) == 1
+        session.commit()
+    page = ladder.server.get(f"/matches/{match['id']}").text
+    assert "/logs/" not in page and "A match's logs are kept 30 days" in page

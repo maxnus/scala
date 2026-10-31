@@ -1,4 +1,4 @@
-"""The API's ladders: making and changing them, their maps, joining them, and entering bots in them."""
+"""The API's ladders: making, changing and removing them, their maps, joining them, and entering bots in them."""
 
 import json
 import re
@@ -6,15 +6,24 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.errors import UploadRefusedError
-from sc2scala.server.bots_api import bot_named, commit_or_conflict
+from sc2scala.server.bots_api import RemovalOutcome, bot_named, commit_or_conflict, removal_summary
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import limits_changed
 from sc2scala.server.ladder_ratings import Standing, standings
-from sc2scala.server.models import Ladder, LadderEntry, LadderMember, MapFile, User
+from sc2scala.server.models import (
+    Ladder,
+    LadderEntry,
+    LadderMember,
+    MapFile,
+    MatchRecord,
+    User,
+    runner_machine_ladders,
+    utc_now,
+)
 from sc2scala.server.passwords import hash_of_password, password_matches
 from sc2scala.server.upload_checks import MAP_SUFFIX, check_map, map_name_of
 from sc2scala.server.web import DatabaseSession, token_user
@@ -102,9 +111,10 @@ def make_ladder(
 
 @router.get("")
 def all_ladders(session: DatabaseSession, user: TokenUser) -> list[dict[str, Any]]:
-    """Every ladder, a protected one shown in full to its members alone."""
+    """Every ladder but the retired, a protected one shown in full to its members alone."""
     ladders = session.scalars(
         select(Ladder)
+        .where(Ladder.retired_at.is_(None))
         .options(
             selectinload(Ladder.owner),
             selectinload(Ladder.maps),
@@ -136,6 +146,12 @@ def change_ladder(session: DatabaseSession, user: TokenUser, name: str, changes:
         limit_changes=changes.limits,
     )
     return ladder_details(ladder, user)
+
+
+@router.delete("/{name}")
+def remove_ladder(session: DatabaseSession, user: TokenUser, name: str) -> dict[str, Any]:
+    """Deletes the user's ladder if it never drew a match, or else retires it, as `remove_ladder_named` says."""
+    return removal_summary(remove_ladder_named(session, user, name))
 
 
 @router.post("/{name}/maps")
@@ -176,6 +192,35 @@ def change_ladder_settings(
     )
     session.commit()
     return ladder
+
+
+def remove_ladder_named(session: Session, user: User, name: str) -> RemovalOutcome:
+    """Deletes the owner's ladder, its entries, members and bars with it, if it never drew a match, and frees its name;
+    or else retires it: it draws no more matches and takes no more entries, no machine serves it, and it keeps its
+    standings as they ended, its matches and its name. A match being played still counts once reported.
+
+    Raises `HTTPException`: 404 for no such ladder, 403 for another's, and 409 for one retired already.
+    """
+    ladder = owned_ladder(session, name, user)
+    if ladder.retired_at is not None:
+        raise HTTPException(409, f"{ladder.name} is retired already")
+    # Retired first, which takes the database's write lock, so that no match is drawn in it between the count and the
+    # delete, which would delete that match with it.
+    ladder.retired_at = utc_now()
+    session.flush()
+    matches = matches_in_ladder(session, ladder)
+    removal = RemovalOutcome(name=ladder.name, retired=matches > 0, matches=matches)
+    if removal.retired:
+        session.execute(delete(runner_machine_ladders).where(runner_machine_ladders.c.ladder_id == ladder.id))
+    else:
+        session.delete(ladder)
+    session.commit()
+    return removal
+
+
+def matches_in_ladder(session: Session, ladder: Ladder) -> int:
+    """How many matches the ladder drew, void ones too."""
+    return session.scalar(select(func.count()).select_from(MatchRecord).where(MatchRecord.ladder_id == ladder.id)) or 0
 
 
 def add_maps(request: Request, session: Session, user: User, name: str, uploads: list[UploadFile]) -> Ladder:
@@ -242,12 +287,16 @@ def join_with_password(session: Session, user: User, name: str, password: str) -
 
 
 def enter_in_ladder(session: Session, user: User, name: str, bot_name: str) -> Ladder:
-    """Enters the user's bot in the ladder, whose member the user becomes; 403 for another's bot, 409 for a bot with no
-    version or in the ladder already."""
+    """Enters the user's bot in the ladder, whose member the user becomes; 403 for another's bot, 409 for a retired
+    ladder or bot, a bot with no version, or one in the ladder already."""
     ladder = visible_ladder(session, name, user)
+    if ladder.retired_at is not None:
+        raise HTTPException(409, f"{ladder.name} is retired: it takes no new entry")
     bot = bot_named(session, bot_name)
     if bot is None or bot.owner_id != user.id:
         raise HTTPException(403, f"You have no bot named {bot_name}")
+    if bot.retired_at is not None:
+        raise HTTPException(409, f"{bot.name} is retired")
     if bot.latest_version is None:
         raise HTTPException(409, f"{bot.name} has no version to play")
     if any(existing.bot_id == bot.id for existing in ladder.entries):
@@ -260,8 +309,9 @@ def enter_in_ladder(session: Session, user: User, name: str, bot_name: str) -> L
 
 
 def withdraw_from_ladder(session: Session, user: User, name: str, bot_name: str) -> Ladder:
-    """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else."""
-    ladder = visible_ladder(session, name, user)
+    """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else, and 409 in a retired
+    ladder, whose standings stay as they ended."""
+    ladder = _open_ladder(visible_ladder(session, name, user))
     entry = _entry_of(ladder, bot_name)
     if not may_withdraw(entry, user):
         raise HTTPException(
@@ -292,8 +342,11 @@ def resume_in_ladder(session: Session, user: User, name: str, bot_name: str) -> 
 
 
 def visible_ladders(session: Session, user: User | None) -> list[Ladder]:
-    """The ladders `user` sees, by name: every public one, and the protected ones they are a member of."""
-    ladders = session.scalars(select(Ladder).options(selectinload(Ladder.members)).order_by(Ladder.name))
+    """The ladders `user` sees, by name, but the retired: every public one, and the protected ones they are a member
+    of."""
+    ladders = session.scalars(
+        select(Ladder).where(Ladder.retired_at.is_(None)).options(selectinload(Ladder.members)).order_by(Ladder.name)
+    )
     return [ladder for ladder in ladders if not ladder.is_protected or is_member(ladder, user)]
 
 
@@ -303,8 +356,9 @@ def may_withdraw(entry: LadderEntry, user: User | None) -> bool:
 
 
 def may_enter(ladder: Ladder, user: User | None) -> bool:
-    """Whether `user` may enter bots in the ladder: anyone signed in in a public one, its members in a protected one."""
-    return user is not None and (not ladder.is_protected or is_member(ladder, user))
+    """Whether `user` may enter bots in the ladder: anyone signed in in a public one, its members in a protected one,
+    and nobody in a retired one."""
+    return user is not None and ladder.retired_at is None and (not ladder.is_protected or is_member(ladder, user))
 
 
 @router.get("/{name}/standings")
@@ -349,7 +403,12 @@ def visible_ladder(session: Session, name: str, user: User | None) -> Ladder:
 
 
 def ladder_summary(ladder: Ladder, user: User | None) -> dict[str, Any]:
-    summary: dict[str, Any] = {"name": ladder.name, "owner": ladder.owner.login, "protected": ladder.is_protected}
+    summary: dict[str, Any] = {
+        "name": ladder.name,
+        "owner": ladder.owner.login,
+        "protected": ladder.is_protected,
+        "retired_at": ladder.retired_at.isoformat() if ladder.retired_at else None,
+    }
     if not ladder.is_protected or is_member(ladder, user):
         summary |= {"maps": len(ladder.maps), "bots": len(ladder.entries), "member": is_member(ladder, user)}
     return summary
@@ -389,6 +448,13 @@ def owned_ladder(session: Session, name: str, user: User) -> Ladder:
     return ladder
 
 
+def _open_ladder(ladder: Ladder) -> Ladder:
+    """The ladder, unless it is retired: 409 then, since its standings stay as they ended."""
+    if ladder.retired_at is not None:
+        raise HTTPException(409, f"{ladder.name} is retired: its standings stay as they ended")
+    return ladder
+
+
 def _entry_of(ladder: Ladder, bot_name: str) -> LadderEntry:
     entry = next((entry for entry in ladder.entries if entry.bot.name.lower() == bot_name.lower()), None)
     if entry is None:
@@ -397,7 +463,7 @@ def _entry_of(ladder: Ladder, bot_name: str) -> LadderEntry:
 
 
 def _authors_entry(session: Session, name: str, bot_name: str, user: User) -> LadderEntry:
-    entry = _entry_of(visible_ladder(session, name, user), bot_name)
+    entry = _entry_of(_open_ladder(visible_ladder(session, name, user)), bot_name)
     if entry.bot.owner_id != user.id:
         raise HTTPException(403, f"{entry.bot.name} is {entry.bot.owner.login}'s")
     return entry

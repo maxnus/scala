@@ -10,6 +10,9 @@
     <a href="/ladders/{{ ladder.name }}/runners">runners</a>{% if user and user.id == ladder.owner_id %} ·
     <a href="/ladders/{{ ladder.name }}/settings">settings</a>{% endif %}
   </p>
+  {% if ladder.retired_at %}
+    <p class="retired">Retired {{ ladder.retired_at | when }}: it draws no more matches, and its standings are as they ended.</p>
+  {% endif %}
   <h2>Standings</h2>
   {% if standings %}
     <div class="scrolls">
@@ -62,7 +65,7 @@
     {% else %}
       <p class="muted">To enter a bot here, upload one on <a href="/account">your page</a>.</p>
     {% endif %}
-  {% elif not user %}
+  {% elif not user and not ladder.retired_at %}
     <p class="muted"><a href="/sign-in?next={{ request.url.path | urlencode }}">Sign in</a> to enter a bot.</p>
   {% endif %}
   <h2>Latest matches</h2>

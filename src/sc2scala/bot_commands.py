@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from sc2scala.errors import ScalaError
+from sc2scala.removal_commands import confirm_at_terminal, removal_line
 from sc2scala.scala_client import ScalaClient
 from sc2scala.signed_in_client import signed_in_client
 
@@ -16,7 +17,7 @@ _SKIPPED_FOLDERS = frozenset({"__pycache__", ".git"})
 
 def add_bot_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
     """Adds `bot` and its subcommands to the commands whose `add_parser` this is."""
-    bot = add_parser("bot", help="upload and look at your bots", description="Uploads and lists your bots.")
+    bot = add_parser("bot", help="upload and look at your bots", description="Uploads, lists and removes your bots.")
     bot.add_argument("--server", help="the server (default: the last one signed in to)")
     commands = bot.add_subparsers(dest="bot_command", required=True)
     upload = commands.add_parser(
@@ -33,6 +34,17 @@ def add_bot_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> None
     commands.add_parser("list", help="list your bots")
     show = commands.add_parser("show", help="show a bot and its versions")
     show.add_argument("name")
+    remove = commands.add_parser(
+        "remove",
+        help="delete your bot, or retire it if it was drawn for a match",
+        description=(
+            "Deletes your bot, with its versions, if it was never drawn for a match, and frees its name; or else "
+            "retires it: it is taken out of every ladder and takes no new version, and its matches, ratings and name "
+            "stay."
+        ),
+    )
+    remove.add_argument("name")
+    remove.add_argument("--yes", action="store_true", help="remove it without asking")
 
 
 def run_bot_command(args: argparse.Namespace, *, http: httpx.Client | None) -> int:
@@ -46,6 +58,14 @@ def run_bot_command(args: argparse.Namespace, *, http: httpx.Client | None) -> i
         case "list":
             for bot in client.my_bots():
                 print(_bot_line(bot))
+        case "remove":
+            confirm_at_terminal(
+                f"Remove {args.name}? It is deleted if it was never drawn for a match, or else retired, its matches "
+                "kept.",
+                assume_yes=args.yes,
+            )
+            removed = client.remove_bot(args.name)
+            print(removal_line(removed, drawn="was drawn for", stays="it plays no more, and its matches stay"))
         case "show":
             bot = client.bot(args.name)
             print(_bot_line(bot))
@@ -79,4 +99,9 @@ def _zip_folder(folder: Path, archive: Path) -> None:
 
 def _bot_line(bot: dict[str, Any]) -> str:
     version = bot["latest_version"]
-    return f"{bot['name']}: {bot['race']}, by {bot['author']}, " + (f"version {version}" if version else "no version")
+    retired = ", retired" if bot.get("retired_at") else ""
+    return (
+        f"{bot['name']}: {bot['race']}, by {bot['author']}, "
+        + (f"version {version}" if version else "no version")
+        + retired
+    )

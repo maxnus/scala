@@ -1,4 +1,5 @@
-"""The API runner machines call with their own tokens: a match to play, its files, and its result."""
+"""The API runner machines call with their own tokens: a match to play, its files, and its result, and removing
+themselves."""
 
 import json
 import zipfile
@@ -23,6 +24,7 @@ from sc2scala.server.ladder_ratings import refit_after_result
 from sc2scala.server.ladders_api import MAP_FILES
 from sc2scala.server.match_draw import LEASED, VOID, draw_match, record_result, void_expired_leases
 from sc2scala.server.models import MatchRecord, RunnerMachine, utc_now
+from sc2scala.server.runners_api import remove_runner_machine
 from sc2scala.server.upload_checks import MAP_SUFFIX
 from sc2scala.server.web import DatabaseSession, runner_machine
 
@@ -41,6 +43,14 @@ Machine = Annotated[RunnerMachine, Depends(runner_machine)]
 
 class FailureReport(BaseModel):
     reason: str
+
+
+@router.delete("/machine")
+def remove_this_machine(session: DatabaseSession, machine: Machine) -> dict[str, str]:
+    """Removes the machine whose token this is, which then fails, and voids the matches it was playing."""
+    name = machine.runner_name
+    remove_runner_machine(session, machine)
+    return {"removed": name}
 
 
 @router.post("/matches", response_model=None)

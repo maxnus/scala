@@ -1,7 +1,9 @@
 import argparse
 import getpass
 import os
+import re
 import signal
+import socket
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -13,7 +15,8 @@ import httpx
 from loguru import logger
 
 from sc2scala.aiarena_engine import AiArenaEngine
-from sc2scala.client_credentials import default_credentials_file
+from sc2scala.client_credentials import ClientCredentials, default_credentials_file
+from sc2scala.errors import ScalaError
 from sc2scala.match_engine import MatchEngine
 from sc2scala.runner import Runner
 from sc2scala.runner_config import (
@@ -33,6 +36,8 @@ _LOCK_FILE_NAME = "runner.pid"
 _SERVICE_NAME = "sc2scala-runner"
 _SERVICE_ENVIRONMENT = ("PATH", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "DOCKER_HOST", "DOCKER_CONTEXT")
 """The variables the service takes from the shell that writes it, so that it finds the same files and Docker."""
+_MACHINE_NAME_LENGTH = 40
+_FALLBACK_MACHINE_NAME = "runner"
 _SECOND_SIGNAL_SECONDS = 1.0
 """How long after a Ctrl-C another counts as a second: under `uv run`, the terminal's Ctrl-C reaches the runner, and
 uv forwards it again about 0.2 s later (uv 0.12)."""
@@ -47,15 +52,26 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     register = commands.add_parser(
         "register",
         help="register this computer as a runner machine of yours",
-        description="Registers this computer as a runner machine of yours, on the server you are signed in to, and "
-        "writes its settings, how many matches it plays at once and when, if it has none.",
+        description="Registers this computer as a runner machine of yours, on the server you are signed in to, or by "
+        "a setup code from the server's Add a runner page, which needs no sign-in and says which ladders it serves; "
+        "and writes its settings, how many matches it plays at once and when, if it has none.",
     )
-    register.add_argument("name", help="the machine's name: letters, digits and '-', 40 at most")
+    register.add_argument(
+        "name",
+        nargs="?",
+        help="the machine's name: letters, digits and '-', 40 at most (default: this computer's host name, made one)",
+    )
     register.add_argument("--server", help="the server (default: the last one signed in to)")
     register.add_argument(
         "--ladders", nargs="*", default=[], metavar="LADDER", help="ladders to serve, protected ones among them"
     )
     register.add_argument("--no-public", action="store_true", help="serve the ladders named alone, no public one")
+    register.add_argument("--setup-code", help="a setup code from the server's Add a runner page, used once")
+    register.add_argument(
+        "--replace",
+        action="store_true",
+        help="with --setup-code, make your machine of this name this computer, as when it is set up again",
+    )
     change = commands.add_parser(
         "set", help="change the ladders a machine of yours serves", description="Changes what it is given alone."
     )
@@ -67,8 +83,13 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     public.add_argument("--no-public", action="store_false", dest="public", help="serve no ladder but those listed")
     machines = commands.add_parser("list", help="list your runner machines")
     machines.add_argument("--server", help="the server (default: the last one signed in to)")
-    remove = commands.add_parser("remove", help="remove a machine of yours, whose matches are then void")
-    remove.add_argument("name")
+    remove = commands.add_parser(
+        "remove",
+        help="remove a machine of yours, whose matches are then void",
+        description="Removes a machine of yours, by your sign-in, or, with no name, this computer, by its own token, "
+        "which it then forgets. The matches it was playing are void.",
+    )
+    remove.add_argument("name", nargs="?", help="the machine (default: this computer, by its own token)")
     remove.add_argument("--server", help="the server (default: the last one signed in to)")
     start = commands.add_parser(
         "start",
@@ -108,6 +129,8 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
                 barred = f", barred from {', '.join(machine['barred_from'])}" if machine["barred_from"] else ""
                 print(f"{machine['name']}: {_serving(machine)}{barred}, last seen {machine['last_seen_at'] or 'never'}")
         case "remove":
+            if args.name is None:
+                return _remove_this_machine(http=http)
             signed_in_client(args.server, http=http).remove_machine(args.name)
             print(f"Removed {args.name}")
         case "start":
@@ -122,8 +145,17 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
 def _register(args: argparse.Namespace, *, http: httpx.Client | None) -> None:
     config_file = default_runner_config_file()
     RunnerConfig.load(config_file)
-    client = signed_in_client(args.server, http=http)
-    machine = client.register_machine(args.name, serves_public=not args.no_public, ladders=args.ladders)
+    name = args.name or machine_name_for_host(socket.gethostname())
+    if args.setup_code:
+        if args.ladders or args.no_public:
+            raise ScalaError("A setup code says which ladders the machine serves: leave out --ladders and --no-public")
+        client = ScalaClient(_setup_server(args.server), "", http=http)
+        machine = client.register_by_setup_code(args.setup_code, name, replace=args.replace)
+    else:
+        if args.replace:
+            raise ScalaError("--replace goes with --setup-code; signed in, remove the machine first")
+        client = signed_in_client(args.server, http=http)
+        machine = client.register_machine(name, serves_public=not args.no_public, ladders=args.ladders)
     RunnerCredentials(server_url=client.server_url, machine=machine["name"], token=machine["token"]).save()
     print(f"This computer is {machine['owner']}/{machine['name']} on {client.server_url}: {_serving(machine)}")
     print(f"Its token is kept in {default_runner_file()}")
@@ -137,6 +169,34 @@ def _register(args: argparse.Namespace, *, http: httpx.Client | None) -> None:
         f"about {suggested_runners(cores=cores, memory_bytes=memory_bytes)} fit this computer"
     )
     print("Run `sc2scala runner start`, or `sc2scala runner service` to run it as a service")
+
+
+def machine_name_for_host(host_name: str) -> str:
+    """`host_name` made a machine's name: its first label, with every run of characters that are not letters or
+    digits made one '-', at most 40, with no '-' at either end; `runner` if nothing is left."""
+    label = host_name.split(".")[0]
+    name = re.sub(r"[^A-Za-z0-9]+", "-", label)[:_MACHINE_NAME_LENGTH].strip("-")
+    return name or _FALLBACK_MACHINE_NAME
+
+
+def _setup_server(server_url: str | None) -> str:
+    """The server a setup code is for: `server_url`, else the last one signed in to; raises `ScalaError` if neither."""
+    server_url = server_url or ClientCredentials.load().default_server
+    if server_url is None:
+        raise ScalaError("Name the server the setup code is from with --server")
+    return server_url
+
+
+def _remove_this_machine(*, http: httpx.Client | None) -> int:
+    """Removes the runner machine this computer is, by its token, and forgets it; returns 1 while its runner runs."""
+    if running_runner(_data_home() / _LOCK_FILE_NAME) is not None:
+        print("The runner is running: stop it first, with `sc2scala runner stop`")
+        return 1
+    credentials = RunnerCredentials.load()
+    removed = ScalaClient(credentials.server_url, credentials.token, http=http).remove_this_machine()
+    default_runner_file().unlink()
+    print(f"Removed {removed['removed']} from {credentials.server_url}; the matches it was playing are void")
+    return 0
 
 
 def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: MatchEngine | None) -> None:

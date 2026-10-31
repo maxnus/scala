@@ -30,6 +30,7 @@ from sc2scala.server import (
     matches_api,
     pages,
     runner_api,
+    runner_setup,
     runners_api,
     sign_in_routes,
 )
@@ -110,6 +111,7 @@ def create_app(
     app.include_router(ladders_api.router)
     app.include_router(ladder_runners_api.router)
     app.include_router(runners_api.router)
+    app.include_router(runner_setup.router)
     app.include_router(runner_api.router)
     app.include_router(matches_api.router)
     app.include_router(bot_forms.router)

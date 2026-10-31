@@ -68,6 +68,14 @@ def server(tmp_path: Path, fake_github: FakeGitHub) -> Iterator[TestClient]:
         yield client
 
 
+@pytest.fixture
+def folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The user's config, cache and data folders, each `tmp_path / <its variable, in lower case>`."""
+    for variable in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
+        monkeypatch.setenv(variable, str(tmp_path / variable.lower()))
+    return tmp_path
+
+
 def csrf_of(client: TestClient, page: str = "/sign-in") -> str:
     """The form token on `page` of the browser's session."""
     found = _CSRF_FIELD.search(client.get(page).text)

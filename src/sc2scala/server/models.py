@@ -261,6 +261,33 @@ class RunnerMachine(Base):
         return f"{self.owner.login}/{self.name}"
 
 
+runner_setup_code_ladders = Table(
+    "runner_setup_code_ladders",
+    Base.metadata,
+    Column("setup_code_id", ForeignKey("runner_setup_codes.id", ondelete="CASCADE"), primary_key=True),
+    Column("ladder_id", ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class RunnerSetupCode(Base):
+    """A code that registers one runner machine of its user's, serving what it says, until `expires_at`.
+
+    Kept as its hash, as a token is, and removed once used: exchanging it needs no other token.
+    """
+
+    __tablename__ = "runner_setup_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    serves_public: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+
+    user: Mapped[User] = relationship()
+    ladders: Mapped[list[Ladder]] = relationship(secondary=runner_setup_code_ladders, order_by=Ladder.name)
+
+
 class MatchRecord(Base):
     """A match drawn for a runner: leased to it until `deadline`, then finished with its result, or void.
 

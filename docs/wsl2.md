@@ -114,14 +114,13 @@ gh auth login
 gh repo clone maxnus/scala ~/scala
 cd ~/scala
 uv sync
-uv run sc2scala login https://scala.example.org
-uv run sc2scala runner register my-pc
+uv run sc2scala runner register --server https://scala.example.org --setup-code scala_setup_...
 ```
 
-`login` shows a code and the server's page, which WSL may open in the Windows browser; if it opens none, open the page
-there yourself, and confirm the code. `runner register` suggests how many runners fit what WSL was given in step 3, and
-writes the runner's settings, `~/.config/sc2scala/runner.toml`, as the [README](../README.md#contributing-a-runner)
-says.
+The setup code comes from the server's *Add a runner* page, opened in the Windows browser, which makes one for the
+ladders you tick; the machine takes the computer's name. `runner register` suggests how many runners fit what WSL was
+given in step 3, and writes the runner's settings, `~/.config/sc2scala/runner.toml`, as the
+[README](../README.md#contributing-a-runner) says.
 
 ## 6. Run the runner as a service
 

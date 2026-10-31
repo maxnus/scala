@@ -5,6 +5,7 @@ import secrets
 
 TOKEN_PREFIX = "scala_"
 RUNNER_TOKEN_PREFIX = "scala_runner_"
+SETUP_CODE_PREFIX = "scala_setup_"
 
 
 def new_token() -> str:
@@ -15,6 +16,12 @@ def new_token() -> str:
 def new_runner_token() -> str:
     """A token for a runner machine, marked as one by its prefix."""
     return RUNNER_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def new_setup_code() -> str:
+    """A code that registers one runner machine, marked as one by its prefix: as random as a token, since it needs no
+    other to be exchanged for the machine's."""
+    return SETUP_CODE_PREFIX + secrets.token_urlsafe(32)
 
 
 def hash_of_token(token: str) -> str:

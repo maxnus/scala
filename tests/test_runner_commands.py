@@ -26,14 +26,6 @@ def ladder(server: TestClient) -> LadderWithBots:
 
 
 @pytest.fixture
-def folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The user's config, cache and data folders, each `tmp_path / <its variable, in lower case>`."""
-    for variable in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
-        monkeypatch.setenv(variable, str(tmp_path / variable.lower()))
-    return tmp_path
-
-
-@pytest.fixture
 def registered(ladder: LadderWithBots, folders: Path) -> LadderWithBots:
     """`ladder`, with this computer signed in as alice and registered as her machine `laptop`."""
     token = ladder.alice["Authorization"].removeprefix("Bearer ")

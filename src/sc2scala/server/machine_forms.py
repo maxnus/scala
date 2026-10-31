@@ -1,6 +1,7 @@
 """The forms of a runner machine's owner on their page: which ladders it serves, and removing it.
 
-Registering a machine stays with `sc2scala runner register`, run on the machine, where its token is kept.
+Registering a machine happens on the machine, where its token is kept: by a setup code from the Add a runner page,
+which `runner_setup` makes, or by `sc2scala runner register` signed in.
 """
 
 from typing import Annotated

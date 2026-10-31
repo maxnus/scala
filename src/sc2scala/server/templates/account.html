@@ -45,6 +45,7 @@
     </p>
   {% endif %}
   <h2>Your runner machines</h2>
+  <p><a class="button" href="/runners/add">Add a runner</a></p>
   {% if machines %}
     <table>
       <thead><tr><th>Machine</th><th>Serves</th><th>Last seen</th></tr></thead>
@@ -77,7 +78,7 @@
       </tbody>
     </table>
   {% else %}
-    <p class="muted">None yet: make this computer one with <code>sc2scala runner register NAME</code>.</p>
+    <p class="muted">None yet.</p>
   {% endif %}
   <h2>Tokens</h2>
   <p>

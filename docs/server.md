@@ -1,17 +1,19 @@
 # A public server
 
-How to run a Scala server for others: on a Linux machine of its own, with a domain pointed at it, behind
+How to run a Scala server for others: on a Linux machine, with a domain pointed at it, behind
 [Caddy](https://caddyserver.com), which gets its HTTPS certificate and limits the size of an upload. The steps are for
-Ubuntu 24.04, and nobody has followed them on a real server yet: the first public server, step 7b of
-[the plan](plan.md), tries them, and its report corrects them.
+Ubuntu 24.04. The first public server, step 7b of [the plan](plan.md), followed them on 2026-10-31, on a machine that
+serves another site behind the same Caddy, and corrected them.
 
 ## What it needs
 
-- A Linux machine that the internet reaches on ports 80 and 443, and a domain name whose DNS points at it. Its own
-  server is best, since it serves the pages, and runs nothing of the bots: the runners play the matches.
-- About 1 GB of memory for the server, a single process, and disk for what it keeps: every version of every bot, up to
-  500 MiB each; every replay, a few hundred KiB each; and the logs of the last 30 days of matches, up to about 200 MiB
-  each, though most are far smaller.
+- A Linux machine that the internet reaches on ports 80 and 443, and a domain name whose DNS points at it. Without a
+  domain of your own, [sslip.io](https://sslip.io) names every address: `203-0-113-7.sslip.io` resolves to
+  `203.0.113.7`, and Caddy gets its certificate as for any other name. The server serves the pages and runs nothing of
+  the bots, since the runners play the matches, so it may share the machine with other sites behind one Caddy.
+- About 1 GB of memory for the server, a single process, which took 120 MB at rest on the first; and disk for what it
+  keeps: every version of every bot, up to 500 MiB each; every replay, a few hundred KiB each; and the logs of the last
+  30 days of matches, up to about 200 MiB each, though most are far smaller.
 - A GitHub account, which registers the app people sign in with.
 
 ## 1. A user of its own
@@ -35,19 +37,26 @@ source ~/.local/bin/env
 uv tool install "sc2scala[server] @ git+https://github.com/maxnus/scala"
 ```
 
-While the repository is private, install from a clone made with your access instead: `uv tool install
-'./scala[server]'`.
+While the repository is private, the server cannot fetch it. Build the package in a clone on a machine that can, and
+copy it to the server:
 
-## 3. Its settings, and GitHub's sign-in
+```bash
+uv build --wheel
+scp dist/sc2scala-0.1.0.dev0-py3-none-any.whl server.example.org:
+```
 
-Register an OAuth app on GitHub, at <https://github.com/settings/applications/new>:
+Then, on the server as yourself, since `scala` has no login by SSH, hand it to `scala`, and install it as `scala`:
 
-| Field | Value |
-|---|---|
-| Homepage URL | `https://scala.example.org`, your domain |
-| Authorization callback URL | `https://scala.example.org/sign-in/github/callback` |
+```bash
+sudo install -o scala -g scala -m 644 sc2scala-0.1.0.dev0-py3-none-any.whl /srv/scala/
+sudo -iu scala uv tool install './sc2scala-0.1.0.dev0-py3-none-any.whl[server]'
+```
 
-Generate a client secret on the app's page. Then make the data folder, and a folder for backups:
+The wheel's name holds the package's version, here `0.1.0.dev0`.
+
+## 3. Its settings
+
+Make the data folder, and a folder for backups:
 
 ```bash
 mkdir -p /srv/scala/data /srv/scala/backups
@@ -62,8 +71,8 @@ public_url = "https://scala.example.org"
 dev_sign_in = false
 
 [github]
-client_id = "the app's client id"
-client_secret = "its client secret"
+client_id = ""
+client_secret = ""
 ```
 
 ```bash
@@ -71,9 +80,13 @@ chmod 600 /srv/scala/data/server.toml
 exit
 ```
 
-The server listens on this machine alone, and Caddy serves it to everyone. Left out, the sections `[uploads]`,
-`[runners]` and `[storage]` take the defaults that `sc2scala server` writes into a new data folder's `server.toml`: a
-bot's zip of 500 MiB at most, and a match's logs kept 30 days.
+The server listens on this machine alone, and Caddy serves it to everyone. Any free port will do, and `ss -ltn` lists
+those taken: the first server took 8100, since the other site's had 8000. Caddy's `reverse_proxy`, in step 5, names
+the same port. Left out, the sections `[uploads]`, `[runners]` and `[storage]` take the defaults that `sc2scala server`
+writes into a new data folder's `server.toml`: a bot's zip of 500 MiB at most, and a match's logs kept 30 days.
+
+Left empty, `[github]` turns GitHub's sign-in off: the server runs, and its sign-in page says that nobody can sign in.
+So the server can be started, and its address checked, before step 7 registers the app.
 
 ## 4. A service
 
@@ -104,9 +117,10 @@ sudo systemctl enable --now scala-server
 journalctl -u scala-server -f
 ```
 
-The server writes only to its data folder, and receives each upload whole in its own `/tmp` before it checks it. Each
-hour it drops the logs of the matches that ended more than `keep_logs_days` ago, and removes the files no bot, map or
-match holds any longer.
+A line of the log, `Serving … sign-in: none`, names the sign-in: `none` until step 7, then `GitHub`. The server writes
+only to its data folder, and receives each upload whole in its own `/tmp` before it checks it. Each hour it drops the
+logs of the matches that ended more than `keep_logs_days` ago, and removes the files no bot, map or match holds any
+longer.
 
 ## 5. Caddy
 
@@ -114,10 +128,12 @@ match holds any longer.
 sudo apt install caddy
 ```
 
-Write `/etc/caddy/Caddyfile`:
+Write `/etc/caddy/Caddyfile`, or, if Caddy serves other sites already, add this block to it beside theirs, with the
+server's port of step 3:
 
 ```caddy
 scala.example.org {
+	encode zstd gzip
 	request_body {
 		max_size 600MB
 	}
@@ -125,18 +141,23 @@ scala.example.org {
 }
 ```
 
+Check the file before Caddy reloads it, the more so when other sites depend on it:
+
 ```bash
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 sudo systemctl reload caddy
 ```
 
-Caddy gets the domain's certificate once the domain points at the machine and ports 80 and 443 are open. The server
-receives an upload whole before it checks who sent it, so Caddy refuses a body past `max_size`. 600 MB holds a bot's
-zip of 500 MiB and the form around it, and a match's result, its replay and its logs, of which each bot's are cut at
-100 MiB. Raise it if you raise the server's `max_bot_mib`, or if a ladder lets each bot log more than 200 MiB.
+Caddy gets the domain's certificate once the domain points at the machine and ports 80 and 443 are open. `encode`
+compresses the pages; with no `match` of its own, it leaves zips and replays as they are. The server receives an upload
+whole before it checks who sent it, so Caddy refuses a body past `max_size`. 600 MB holds a bot's zip of 500 MiB and
+the form around it, and a match's result, its replay and its logs, of which each bot's are cut at 100 MiB. Raise it if
+you raise the server's `max_bot_mib`, or if a ladder lets each bot log more than 200 MiB.
 
 Caddy runs on the same machine, since the server trusts the forwarded headers of a proxy at 127.0.0.1 alone: from
 them it learns each visitor's address, which limits how many sign-ins may wait from one, and that the pages are served
-over HTTPS.
+over HTTPS. So share the machine only with users and services you trust: any of them reaches the server's port
+directly, past Caddy, and may send a body past `max_size`, or forge those headers.
 
 ## 6. A firewall
 
@@ -147,7 +168,31 @@ sudo ufw allow https
 sudo ufw enable
 ```
 
-## 7. Sign in
+A machine that serves other sites has these open already, as `sudo ufw status` says. If it says `inactive`, allow
+every other port its services listen on before `ufw enable`, which closes the rest.
+
+## 7. GitHub's sign-in
+
+Register an OAuth app on GitHub, at <https://github.com/settings/applications/new>:
+
+| Field | Value |
+|---|---|
+| Homepage URL | `https://scala.example.org`, your domain |
+| Authorization callback URL, or Redirect URI, as the form called it in October 2026 | `https://scala.example.org/sign-in/github/callback` |
+
+Leave Enable Device Flow off: `sc2scala login` signs in through the server's pages, not by GitHub's device flow.
+Whether user access tokens expire makes no difference, since the server uses GitHub's token once, to read who signed
+in, and does not keep it. A form that asks for a webhook and permissions too registers a GitHub App, another kind.
+
+Generate a client secret on the app's page. Put the client id and the secret in `[github]` in `server.toml`, by an
+editor run as `scala`, so that the file stays the server's, and restart the server:
+
+```bash
+sudo -iu scala nano /srv/scala/data/server.toml
+sudo systemctl restart scala-server
+```
+
+## 8. Sign in
 
 Open `https://scala.example.org`, sign in with GitHub, and make the first ladder.
 
@@ -157,6 +202,15 @@ Back up first, then:
 
 ```bash
 sudo -iu scala uv tool upgrade sc2scala
+sudo systemctl restart scala-server
+```
+
+Installed from a wheel, Scala does not upgrade so: `uv tool upgrade` finds nothing to upgrade, and installing again
+says it is installed already. Hand the new wheel to `scala` as in step 2, and install it with `--reinstall-package`,
+which reinstalls Scala alone:
+
+```bash
+sudo -iu scala uv tool install --reinstall-package sc2scala './sc2scala-0.1.0.dev0-py3-none-any.whl[server]'
 sudo systemctl restart scala-server
 ```
 

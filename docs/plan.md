@@ -227,13 +227,16 @@ Each step ends in something that runs, and is a pull request of its own.
      ladder's runners, and barring them; and which ladders one's machines serve, and removing one.
    - 6c, done: `sc2scala login` signed in through the browser, by a code the user confirms, and the README begun in
      the browser.
-7. **The first public server**, on the owner's VPS, in two steps:
+7. **The first public server**, on the owner's VPS, in three steps:
    - 7a, done: what a public server needs: SQLite writing ahead, logs dropped once old and unused files removed,
      `sc2scala server backup`, deleting and retiring bots and ladders, the list of bots, and
      [a guide to a public server](server.md), behind Caddy, which limits a request's body, since the app receives an
      upload whole before it checks who sent it.
-   - 7b: the owner's VPS serving the first public ladder, by the guide, with the owner's domain and GitHub app, and a
-     first runner on max-9950 as a user of its own.
+   - 7b, done: the owner's VPS serves the first ladder, by the guide, which its install corrected, since 2026-10-31:
+     at an sslip.io name, with the owner's GitHub app, beside another site behind the same Caddy, with a copy of its
+     database each night on the VPS itself. Copying the copies and the files off the VPS is not set up yet.
+   - 7c: adding a runner, which takes a dozen commands and sudo by [the sandbox](sandbox.md)'s steps, made about one
+     command, planned in a pull request of its own. Its first runner is max-9950, as a user of its own.
 
 ## Open
 

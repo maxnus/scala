@@ -233,8 +233,8 @@ Each step ends in something that runs, and is a pull request of its own.
      [a guide to a public server](server.md), behind Caddy, which limits a request's body, since the app receives an
      upload whole before it checks who sent it.
    - 7b, done: the owner's VPS serves the first ladder, by the guide, which its install corrected, since 2026-10-31:
-     at an sslip.io name, with the owner's GitHub app, beside another site behind the same Caddy, and backed up each
-     night.
+     at an sslip.io name, with the owner's GitHub app, beside another site behind the same Caddy, with a copy of its
+     database each night on the VPS itself. Copying the copies and the files off the VPS is not set up yet.
    - 7c: adding a runner, which takes a dozen commands and sudo by [the sandbox](sandbox.md)'s steps, made about one
      command, planned in a pull request of its own. Its first runner is max-9950, as a user of its own.
 

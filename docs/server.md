@@ -37,12 +37,22 @@ source ~/.local/bin/env
 uv tool install "sc2scala[server] @ git+https://github.com/maxnus/scala"
 ```
 
-While the repository is private, the server cannot fetch it. Build the package on a machine that can, by `uv build
---wheel` in a clone, copy the wheel it writes in `dist/` to `/srv/scala`, owned by `scala`, and install that:
+While the repository is private, the server cannot fetch it. Build the package in a clone on a machine that can, and
+copy it to the server:
 
 ```bash
-uv tool install './sc2scala-0.1.0.dev0-py3-none-any.whl[server]'
+uv build --wheel
+scp dist/sc2scala-0.1.0.dev0-py3-none-any.whl server.example.org:
 ```
+
+Then, on the server as yourself, since `scala` has no login by SSH, hand it to `scala`, and install it as `scala`:
+
+```bash
+sudo install -o scala -g scala -m 644 sc2scala-0.1.0.dev0-py3-none-any.whl /srv/scala/
+sudo -iu scala uv tool install './sc2scala-0.1.0.dev0-py3-none-any.whl[server]'
+```
+
+The wheel's name holds the package's version, here `0.1.0.dev0`.
 
 ## 3. Its settings
 
@@ -71,9 +81,9 @@ exit
 ```
 
 The server listens on this machine alone, and Caddy serves it to everyone. Any free port will do, and `ss -ltn` lists
-those taken: the first server took 8100, since the other site's had 8000. Left out, the sections `[uploads]`,
-`[runners]` and `[storage]` take the defaults that `sc2scala server` writes into a new data folder's `server.toml`: a
-bot's zip of 500 MiB at most, and a match's logs kept 30 days.
+those taken: the first server took 8100, since the other site's had 8000. Caddy's `reverse_proxy`, in step 5, names
+the same port. Left out, the sections `[uploads]`, `[runners]` and `[storage]` take the defaults that `sc2scala server`
+writes into a new data folder's `server.toml`: a bot's zip of 500 MiB at most, and a match's logs kept 30 days.
 
 Left empty, `[github]` turns GitHub's sign-in off: the server runs, and its sign-in page says that nobody can sign in.
 So the server can be started, and its address checked, before step 7 registers the app.
@@ -107,9 +117,10 @@ sudo systemctl enable --now scala-server
 journalctl -u scala-server -f
 ```
 
-The log's first line names the sign-in: `none` until step 7, then `GitHub`. The server writes only to its data folder,
-and receives each upload whole in its own `/tmp` before it checks it. Each hour it drops the logs of the matches that
-ended more than `keep_logs_days` ago, and removes the files no bot, map or match holds any longer.
+A line of the log, `Serving … sign-in: none`, names the sign-in: `none` until step 7, then `GitHub`. The server writes
+only to its data folder, and receives each upload whole in its own `/tmp` before it checks it. Each hour it drops the
+logs of the matches that ended more than `keep_logs_days` ago, and removes the files no bot, map or match holds any
+longer.
 
 ## 5. Caddy
 
@@ -117,7 +128,8 @@ ended more than `keep_logs_days` ago, and removes the files no bot, map or match
 sudo apt install caddy
 ```
 
-Write `/etc/caddy/Caddyfile`, or, if Caddy serves other sites already, add this block to it beside theirs:
+Write `/etc/caddy/Caddyfile`, or, if Caddy serves other sites already, add this block to it beside theirs, with the
+server's port of step 3:
 
 ```caddy
 scala.example.org {
@@ -144,7 +156,8 @@ you raise the server's `max_bot_mib`, or if a ladder lets each bot log more than
 
 Caddy runs on the same machine, since the server trusts the forwarded headers of a proxy at 127.0.0.1 alone: from
 them it learns each visitor's address, which limits how many sign-ins may wait from one, and that the pages are served
-over HTTPS.
+over HTTPS. So share the machine only with users and services you trust: any of them reaches the server's port
+directly, past Caddy, and may send a body past `max_size`, or forge those headers.
 
 ## 6. A firewall
 
@@ -155,7 +168,8 @@ sudo ufw allow https
 sudo ufw enable
 ```
 
-A machine that serves other sites has these open already, as `sudo ufw status` says.
+A machine that serves other sites has these open already, as `sudo ufw status` says. If it says `inactive`, allow
+every other port its services listen on before `ufw enable`, which closes the rest.
 
 ## 7. GitHub's sign-in
 
@@ -164,17 +178,17 @@ Register an OAuth app on GitHub, at <https://github.com/settings/applications/ne
 | Field | Value |
 |---|---|
 | Homepage URL | `https://scala.example.org`, your domain |
-| Authorization callback URL, which GitHub's newer form calls Redirect URI | `https://scala.example.org/sign-in/github/callback` |
+| Authorization callback URL, or Redirect URI, as the form called it in October 2026 | `https://scala.example.org/sign-in/github/callback` |
 
 Leave Enable Device Flow off: `sc2scala login` signs in through the server's pages, not by GitHub's device flow.
 Whether user access tokens expire makes no difference, since the server uses GitHub's token once, to read who signed
 in, and does not keep it. A form that asks for a webhook and permissions too registers a GitHub App, another kind.
 
 Generate a client secret on the app's page. Put the client id and the secret in `[github]` in `server.toml`, by an
-editor run as root, which keeps the file's owner and mode, and restart the server:
+editor run as `scala`, so that the file stays the server's, and restart the server:
 
 ```bash
-sudo nano /srv/scala/data/server.toml
+sudo -iu scala nano /srv/scala/data/server.toml
 sudo systemctl restart scala-server
 ```
 
@@ -192,10 +206,12 @@ sudo systemctl restart scala-server
 ```
 
 Installed from a wheel, Scala does not upgrade so: `uv tool upgrade` finds nothing to upgrade, and installing again
-says it is installed already. Install the new wheel with `--reinstall` instead:
+says it is installed already. Hand the new wheel to `scala` as in step 2, and install it with `--reinstall-package`,
+which reinstalls Scala alone:
 
 ```bash
-sudo -iu scala uv tool install --reinstall './sc2scala-0.1.0.dev0-py3-none-any.whl[server]'
+sudo -iu scala uv tool install --reinstall-package sc2scala './sc2scala-0.1.0.dev0-py3-none-any.whl[server]'
+sudo systemctl restart scala-server
 ```
 
 The server brings its database up to date as it starts.

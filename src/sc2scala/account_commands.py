@@ -64,13 +64,22 @@ def run_login(args: argparse.Namespace, *, http: httpx.Client | None) -> int:
 def _token_confirmed_in_browser(server_url: str, *, http: httpx.Client | None, open_browser: bool) -> str:
     """A token this command makes, once someone signed in on the server confirms the code it shows.
 
-    Raises `ScalaError` if the request is refused, nobody answers it before it expires, or Ctrl-C stops the wait. A
-    server that cannot be reached meanwhile is asked again.
+    Raises `ScalaError` if the server has no sign-in through the browser, the request is refused, nobody answers it
+    before it expires, or Ctrl-C stops the wait. A server that cannot be reached meanwhile is asked again.
     """
     token = new_token()
-    asked = ScalaClient(server_url, "", http=http).request_login(
-        token_hash=hash_of_token(token), name=f"sc2scala on {socket.gethostname()}"
-    )
+    try:
+        asked = ScalaClient(server_url, "", http=http).request_login(
+            token_hash=hash_of_token(token), name=f"sc2scala on {socket.gethostname()}"
+        )
+    except ServerError as error:
+        if error.status_code not in (404, 405):
+            raise
+        raise ScalaError(
+            f"{server_url} has no sign-in through the browser: it is no Scala server, or one older than this command. "
+            f"Restart it if it was just updated, or sign in with a token made on {server_url}/account: "
+            f"sc2scala login {server_url} --token TOKEN"
+        ) from error
     print(f"Confirm the code {asked['code']} on {asked['confirm_url']}")
     if open_browser and not webbrowser.open(asked["confirm_url"]):
         print("Open that page in a browser: none could be opened here")

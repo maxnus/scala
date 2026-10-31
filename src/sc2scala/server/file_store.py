@@ -9,6 +9,8 @@ from typing import BinaryIO, TypeVar
 from sc2scala.errors import UploadTooLargeError
 
 _CHUNK_BYTES = 1024 * 1024
+PARTIAL_UPLOAD_PREFIX = ".upload-"
+"""How the name of an upload being received begins, before it is checked and kept."""
 _CheckResult = TypeVar("_CheckResult")
 
 
@@ -47,7 +49,7 @@ class FileStore:
         folder.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256()
         size_bytes = 0
-        descriptor, temporary_name = tempfile.mkstemp(dir=folder, prefix=".upload-")
+        descriptor, temporary_name = tempfile.mkstemp(dir=folder, prefix=PARTIAL_UPLOAD_PREFIX)
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as received:

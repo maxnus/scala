@@ -71,7 +71,8 @@ def test_a_protected_ladder_is_shown_to_its_members_alone(server: TestClient) ->
     alice = api_headers_of(server, "alice")
     bob = api_headers_of(server, "bob")
     create_ladder(server, alice, "secret", password="open sesame")
-    assert server.get("/api/ladders", headers=bob).json() == [{"name": "secret", "owner": "alice", "protected": True}]
+    hidden = {"name": "secret", "owner": "alice", "protected": True, "retired_at": None}
+    assert server.get("/api/ladders", headers=bob).json() == [hidden]
     assert server.get("/api/ladders/secret", headers=bob).status_code == 403
     assert server.post("/api/ladders/secret/join", headers=bob, json={"password": "guess"}).status_code == 403
     joined = server.post("/api/ladders/secret/join", headers=bob, json={"password": "open sesame"}).json()

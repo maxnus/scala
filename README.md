@@ -15,13 +15,16 @@ On a server's pages, once signed in:
 - **Your bots:** upload a bot as a zip from your page, and its next versions from the bot's own page. The zip holds the
   bot's folder in AI Arena's layout: `run.py` for a Python bot, or `<name>.dll`, `<name>.jar`, `<name>.js` or a Linux
   binary `<name>` for the others, named for the bot. Zipping the folder itself, or the files in it, both work. A
-  Windows bot, `<name>.exe`, does not play yet.
-- **Ladders:** the home page lists them; a ladder's page shows its standings, by a rating fitted to every game, its
-  latest matches with their replays, and each pair's record. Enter your bot there, and pause or withdraw it there or on
-  the bot's page. A protected ladder's page asks for its password first.
+  Windows bot, `<name>.exe`, does not play yet. The bot's page deletes it, if it never played, or else retires it: it
+  leaves every ladder and takes no new version, and its matches, ratings and name stay.
+- **Ladders and bots:** the home page lists the ladders, and the Bots page every bot. A ladder's page shows its
+  standings, by a rating fitted to every game, its latest matches with their replays, and each pair's record. Enter
+  your bot there, and pause or withdraw it there or on the bot's page. A protected ladder's page asks for its password
+  first.
 - **Your own ladders:** make one from the home page, of its maps and with the engine's limits. Its settings page
-  changes its password, limits and maps, and its runners page lists the machines that played its matches, where you
-  may bar one: it then plays none of them, and the results it reported are void, unless you keep them.
+  changes its password, limits and maps, and deletes it, if it never drew a match, or else retires it: it draws no
+  more, and keeps its standings, matches and name. Its runners page lists the machines that played its matches, where
+  you may bar one: it then plays none of them, and the results it reported are void, unless you keep them.
 - **Your page:** your bots, your runner machines and which ladders each serves, and the tokens your command line and
   runners act with.
 
@@ -74,6 +77,7 @@ uv run sc2scala ladder standings night-league
 `--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala ladder runners LADDER` lists
 the machines that played a ladder's matches, and its owner bars one with `sc2scala ladder bar-runner LADDER
 OWNER/MACHINE`, which voids its results there unless given `--keep-results`, and lifts the bar with `unbar-runner`.
+`sc2scala bot remove BOT` and `sc2scala ladder remove LADDER` delete or retire, as the pages do, once you confirm.
 `sc2scala --help` lists the rest.
 
 ## Playing one match
@@ -100,7 +104,9 @@ uv run sc2scala server --data path/to/server-data
 ```
 
 To let people sign in with GitHub, register an OAuth app on GitHub, with `<public_url>/sign-in/github/callback` as its
-callback URL, and put its client id and secret in `server.toml`.
+callback URL, and put its client id and secret in `server.toml`. [A public server](docs/server.md) says how to serve
+others: behind Caddy, as a service, with nightly backups by `sc2scala server backup`, which copies the database while
+the server runs. The server keeps a match's logs 30 days, and its replay for good.
 
 ## Developing
 

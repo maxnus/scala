@@ -9,15 +9,21 @@ MIGRATIONS_FOLDER = Path(__file__).parent / "migrations"
 
 
 def create_database_engine(database_url: str) -> Engine:
-    """The engine of the database at `database_url`, which on SQLite enforces foreign keys."""
+    """The engine of the database at `database_url`, which on SQLite enforces foreign keys and writes ahead.
+
+    With write-ahead logging, pages read the database while a result is written to it. Its `synchronous=NORMAL` may
+    lose the last results to a power cut, but never breaks the database.
+    """
     if not database_url.startswith("sqlite"):
         return create_engine(database_url)
     engine = create_engine(database_url, connect_args={"check_same_thread": False})
 
     @event.listens_for(engine, "connect")
-    def enforce_foreign_keys(connection: Any, connection_record: Any) -> None:
+    def configure_sqlite(connection: Any, connection_record: Any) -> None:
         cursor = connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
     return engine

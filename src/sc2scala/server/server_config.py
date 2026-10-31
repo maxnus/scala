@@ -10,7 +10,7 @@ from loguru import logger
 
 CONFIG_FILE_NAME = "server.toml"
 _SECRET_KEY_FILE_NAME = "secret_key"
-_DATABASE_FILE_NAME = "scala.db"
+DATABASE_FILE_NAME = "scala.db"
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 _DEFAULT_CONFIG = """\
@@ -38,6 +38,10 @@ max_result_file_mib = 300
 # A runner has a match's real-time limit and this margin, in seconds, to report its result.
 [runners]
 lease_margin_seconds = 900
+
+# How many days a match's logs are kept once it ends, 0 for good; its replay is kept for good.
+[storage]
+keep_logs_days = 30
 """
 
 
@@ -49,7 +53,8 @@ class ServerConfig:
     `public_url` are local: a server behind a reverse proxy listens locally, yet serves everyone. `secret_key` signs the
     session cookies. A bot's zip may hold `max_bot_upload_mib`, and unpack to `max_bot_unpacked_mib`; a map may hold
     `max_map_upload_mib`, and each file of a match's result `max_result_upload_mib`. A runner has a match's real-time
-    limit and `lease_margin_seconds` to report its result.
+    limit and `lease_margin_seconds` to report its result. A match's logs are kept `keep_logs_days` once it ends, for
+    good if 0.
     """
 
     data_folder: Path
@@ -65,17 +70,22 @@ class ServerConfig:
     max_map_upload_mib: int = 50
     max_result_upload_mib: int = 300
     lease_margin_seconds: int = 900
+    keep_logs_days: int = 30
 
     def __post_init__(self) -> None:
         if self.dev_sign_in and self.host not in _LOCAL_HOSTS:
             raise ValueError(f"dev_sign_in lets anyone in, so it needs a local host, not {self.host!r}")
         if self.dev_sign_in and urlparse(self.public_url).hostname not in _LOCAL_HOSTS:
             raise ValueError(f"dev_sign_in lets anyone in, so it needs a local public_url, not {self.public_url!r}")
+        if self.keep_logs_days < 0:
+            raise ValueError(
+                f"keep_logs_days is a number of days, or 0 to keep logs for good, not {self.keep_logs_days}"
+            )
 
     @property
     def database_url(self) -> str:
         """The SQLite database in the data folder."""
-        return f"sqlite:///{self.data_folder / _DATABASE_FILE_NAME}"
+        return f"sqlite:///{self.data_folder / DATABASE_FILE_NAME}"
 
     @property
     def github_sign_in(self) -> bool:
@@ -108,6 +118,7 @@ class ServerConfig:
             max_map_upload_mib=int(uploads.get("max_map_mib", 50)),
             max_result_upload_mib=int(uploads.get("max_result_file_mib", 300)),
             lease_margin_seconds=int(settings.get("runners", {}).get("lease_margin_seconds", 900)),
+            keep_logs_days=int(settings.get("storage", {}).get("keep_logs_days", 30)),
         )
 
 

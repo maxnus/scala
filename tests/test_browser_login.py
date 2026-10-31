@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -213,3 +214,13 @@ def test_no_page_may_be_framed_by_another_site(server: TestClient) -> None:
         response = server.get(page)
         assert response.headers["X-Frame-Options"] == "DENY"
         assert response.headers["Content-Security-Policy"] == "frame-ancestors 'none'"
+
+
+def test_a_server_without_sign_in_through_the_browser_is_explained(
+    credentials_file: Path, at_a_terminal: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    older_server = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404, json={})))
+    assert main(["login", "http://localhost", "--no-browser"], http=older_server) == 1
+    error = capsys.readouterr().err
+    assert "has no sign-in through the browser" in error
+    assert "sc2scala login http://localhost --token TOKEN" in error

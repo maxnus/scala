@@ -1,15 +1,16 @@
-"""The server's pages: its ladders, a ladder's standings, matches and pairs, a match, and a bot; they only show."""
+"""The server's pages: its ladders and bots, a ladder's standings, matches and pairs, a match, and a bot; they only
+show."""
 
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.race import Race
 from sc2scala.result_code import ResultCode
-from sc2scala.server.bots_api import bot_named, bots_of
+from sc2scala.server.bots_api import bot_named, bots_of, matches_of_bot
 from sc2scala.server.ladder_ratings import (
     INTERVAL_WIDTH,
     PRIOR_SD,
@@ -35,7 +36,7 @@ from sc2scala.server.matches_api import (
     replay_of,
     visible_match,
 )
-from sc2scala.server.models import Ladder, LadderEntry, MatchRecord, User
+from sc2scala.server.models import BotRecord, Ladder, LadderEntry, MatchRecord, User
 from sc2scala.server.web import DatabaseSession, render, signed_in_user
 
 router = APIRouter()
@@ -50,6 +51,7 @@ SignedInUser = Annotated[User | None, Depends(signed_in_user)]
 def ladders_page(request: Request, session: DatabaseSession, user: SignedInUser) -> HTMLResponse:
     ladders = session.scalars(
         select(Ladder)
+        .where(Ladder.retired_at.is_(None))
         .options(selectinload(Ladder.owner), selectinload(Ladder.entries), selectinload(Ladder.members))
         .order_by(Ladder.name)
     )
@@ -127,14 +129,19 @@ def pairs_page(request: Request, session: DatabaseSession, user: SignedInUser, n
 
 @router.get("/matches/{match_id}", response_class=HTMLResponse)
 def match_page(request: Request, session: DatabaseSession, user: SignedInUser, match_id: int) -> HTMLResponse:
+    """The match, with links to the logs the user may read while they are kept."""
     record = visible_match(session, user, match_id)
+    bot_logs = (record.player_1_logs_sha256, record.player_2_logs_sha256)
+    may_read = [seat for seat in (1, 2) if may_read_bot_logs(record, user, seat=seat)]
     return render(
         request,
         "match.html",
         user=user,
         match=_shown_match(record),
-        readable_logs=[seat for seat in (1, 2) if may_read_bot_logs(record, user, seat=seat)],
-        engine_logs=may_read_engine_logs(record, user),
+        readable_logs=[seat for seat in may_read if bot_logs[seat - 1] is not None],
+        engine_logs=record.engine_logs_sha256 is not None and may_read_engine_logs(record, user),
+        reads_logs=bool(may_read) or may_read_engine_logs(record, user),
+        keep_logs_days=request.app.state.config.keep_logs_days,
     )
 
 
@@ -150,8 +157,21 @@ def logs_download(
     return logs_of(request, session, user, match_id, part)
 
 
+@router.get("/bots", response_class=HTMLResponse)
+def bots_page(request: Request, session: DatabaseSession, user: SignedInUser) -> HTMLResponse:
+    """Every bot but the retired, by name."""
+    bots = session.scalars(
+        select(BotRecord)
+        .where(BotRecord.retired_at.is_(None))
+        .options(selectinload(BotRecord.owner), selectinload(BotRecord.versions))
+        .order_by(func.lower(BotRecord.name))
+    )
+    return render(request, "bots.html", user=user, bots=list(bots))
+
+
 @router.get("/bots/{name}", response_class=HTMLResponse)
 def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
+    """The bot's ladders and versions, and its latest matches in every ladder the user may see, those it left too."""
     bot = bot_named(session, name)
     if bot is None:
         raise HTTPException(404, f"No bot is named {name}")
@@ -163,22 +183,24 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
         for entry in bot_entries
         if not entry.ladder.is_protected or is_member(entry.ladder, user)
     ]
-    visible_ids = [entry["ladder"].id for entry in ladders]
     version_ids = [version.id for version in bot.versions]
+    played_by_bot = MatchRecord.player_1_version_id.in_(version_ids) | MatchRecord.player_2_version_id.in_(version_ids)
+    played_in = session.scalars(
+        select(Ladder).where(Ladder.id.in_(select(MatchRecord.ladder_id).where(played_by_bot).distinct()))
+    )
+    visible_ids = [ladder.id for ladder in played_in if not ladder.is_protected or is_member(ladder, user)]
     matches = session.scalars(
         select(MatchRecord)
-        .where(
-            MatchRecord.ladder_id.in_(visible_ids),
-            MatchRecord.player_1_version_id.in_(version_ids) | MatchRecord.player_2_version_id.in_(version_ids),
-        )
+        .where(MatchRecord.ladder_id.in_(visible_ids), played_by_bot)
         .order_by(MatchRecord.id.desc())
         .limit(_MATCHES_ON_LADDER_PAGE)
     )
     is_author = user is not None and bot.owner_id == user.id
+    may_change = is_author and bot.retired_at is None
     entered_ladders = {entry.ladder_id for entry in bot_entries}
     enterable_ladders = (
         [ladder for ladder in visible_ladders(session, user) if ladder.id not in entered_ladders]
-        if is_author and bot.latest_version
+        if may_change and bot.latest_version
         else []
     )
     return render(
@@ -188,7 +210,8 @@ def bot_page(request: Request, session: DatabaseSession, user: SignedInUser, nam
         bot=bot,
         ladders=ladders,
         matches=_shown_matches(list(matches)),
-        is_author=is_author,
+        may_change=may_change,
+        matches_played=matches_of_bot(session, bot) if may_change else 0,
         enterable_ladders=enterable_ladders,
         races=list(Race),
     )

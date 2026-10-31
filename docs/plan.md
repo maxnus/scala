@@ -41,6 +41,10 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 8. **The server renders its pages**, with no JavaScript build, and people do in them everything but run a runner
    (the owner, 2026-10-24, reversing step 3's pages that only showed): a bot's author needs no install. The CLI does
    the same through the API, and runs the runners.
+9. **The server keeps SQLite**, with write-ahead logging, until a server outgrows it (the owner, 2026-10-31, for step
+   7a): one process, with a few runners reporting a result every few minutes, is well within it.
+10. **A bot or a ladder is deleted only if it never played**, and its name is free again; one that played is retired
+    instead, so that every match keeps its players and its ladder (the owner, 2026-10-31, for step 7a).
 
 ## Design
 
@@ -63,6 +67,10 @@ The engine finds the entry point by the bot's name, so a name follows its rules,
 it arrives. Every upload is a version, kept by its hash and never changed. A ladder plays each entered bot's latest
 version, and a version's rating and games stay in the bot's history once a newer one replaces it.
 
+Its author deletes a bot that was never drawn for a match, with its versions. One that was is retired instead: it
+leaves every ladder but the retired ones, takes no new version, and is left out of the list of bots, while its
+matches, ratings and name stay.
+
 ### Ladders
 
 A ladder is a name, an owner, an optional password, a map pool and the engine's limits: the game time, the time a bot
@@ -73,6 +81,10 @@ Anyone can create a ladder.
 Whoever gives a protected ladder's password once becomes a member. Members alone can enter bots, serve it with a
 runner, and see its pages, matches and replays. A public ladder's pages are open to everyone, and anyone signed in can
 enter a bot.
+
+Its owner deletes a ladder that never drew a match. One that did is retired instead: it draws no more matches, takes
+no new entry, no machine serves it, and it is left out of the list of ladders, while its standings, as they ended, its
+matches and its name stay. A match being played when it retires still counts once reported.
 
 Whoever sees a ladder sees the runner machines that played its matches, and its owner can bar one, by its owner and
 name. A barred machine draws none of the ladder's matches; those it is playing there are void, and so are its results
@@ -170,7 +182,9 @@ lands as a user who owns nothing of its owner's.
 
 ### The server
 
-Python, FastAPI, PostgreSQL in deployment and SQLite in tests, and files on disk: bot versions, maps, replays and logs.
+Python, FastAPI, SQLite with write-ahead logging, and files on disk, each kept once by its hash: bot versions, maps,
+replays and logs. A match's logs are kept 30 days by default, its replay for good, and each hour the server removes the
+files no row holds. `sc2scala server backup` copies the database while the server runs.
 The pages' forms, signed in, and the app's commands (`sc2scala bot upload`, `sc2scala ladder create`, `sc2scala ladder
 join`) and the runners, by a token of the user's, do the same through functions they share: each form calls what its
 API route calls.
@@ -206,15 +220,20 @@ Each step ends in something that runs, and is a pull request of its own.
 5. **Windows.** Done, untested: [a guide to a runner in WSL2](wsl2.md), written from Microsoft's documentation of WSL,
    since no Windows machine was at hand (the owner, 2026-10-24). The first runner on Windows tests it, and its report
    corrects it.
-6. **The browser**: everything but running a runner done in the pages, in three pull requests.
+6. **The browser**, done: everything but running a runner done in the pages, in three pull requests.
    - 6a, done: bots and entries: a new bot and its versions, joining a protected ladder, and entering, pausing,
      resuming and withdrawing bots. A zip of the bot's folder itself is read as that folder.
    - 6b, done: ladders and runners, for their owners: making a ladder and changing its password, limits and maps; a
      ladder's runners, and barring them; and which ladders one's machines serve, and removing one.
    - 6c, done: `sc2scala login` signed in through the browser, by a code the user confirms, and the README begun in
      the browser.
-7. **The first public server**, on the owner's VPS. Its reverse proxy limits a request's body, since the app receives an
-   upload whole before it checks who sent it.
+7. **The first public server**, on the owner's VPS, in two steps:
+   - 7a, done: what a public server needs: SQLite writing ahead, logs dropped once old and unused files removed,
+     `sc2scala server backup`, deleting and retiring bots and ladders, the list of bots, and
+     [a guide to a public server](server.md), behind Caddy, which limits a request's body, since the app receives an
+     upload whole before it checks who sent it.
+   - 7b: the owner's VPS serving the first public ladder, by the guide, with the owner's domain and GitHub app, and a
+     first runner on max-9950 as a user of its own.
 
 ## Open
 

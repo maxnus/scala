@@ -1,4 +1,5 @@
-"""The pages and forms of a ladder's owner: making a ladder, its settings and maps, and barring its runners.
+"""The pages and forms of a ladder's owner: making a ladder, its settings and maps, barring its runners, and removing
+it.
 
 As the bots' forms do, each form calls the function its API route calls, and sends the browser back to a page that
 says once what it did, or why it was refused.
@@ -18,7 +19,9 @@ from sc2scala.server.ladders_api import (
     change_ladder_settings,
     ladder_named,
     make_ladder,
+    matches_in_ladder,
     owned_ladder,
+    remove_ladder_named,
     remove_map_named,
 )
 from sc2scala.server.models import User
@@ -106,7 +109,7 @@ def new_ladder(
 
 @router.get("/ladders/{name}/settings", response_class=HTMLResponse)
 def settings_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
-    """The owner's page of the ladder's password, limits and maps."""
+    """The owner's page of the ladder's password, limits and maps, and of removing it."""
     ladder = owned_ladder(session, name, user)
     return render(
         request,
@@ -115,6 +118,7 @@ def settings_page(request: Request, session: DatabaseSession, user: SignedInUser
         ladder=ladder,
         limit_groups=LIMIT_GROUPS,
         limits=limit_values(game_limits=ladder.game_limits, resource_limits=ladder.resource_limits),
+        matches_drawn=matches_in_ladder(session, ladder),
     )
 
 
@@ -209,6 +213,25 @@ def remove_map_from_ladder(
     except HTTPException as error:
         return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
     return redirect_with_notice(request, settings, f"Took {map_name} out")
+
+
+@router.post("/ladders/{name}/remove")
+def remove_ladder(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, csrf_token: CsrfToken
+) -> RedirectResponse:
+    """Deletes the owner's ladder if it never drew a match, or else retires it."""
+    check_csrf(request, csrf_token)
+    try:
+        removal = remove_ladder_named(session, user, name)
+    except HTTPException as error:
+        return redirect_with_notice(request, f"/ladders/{name}/settings", refusal_reason(error), refused=True)
+    if removal.retired:
+        return redirect_with_notice(
+            request,
+            f"/ladders/{removal.name}",
+            f"Retired {removal.name}: it draws no more matches, and keeps its standings and matches",
+        )
+    return redirect_with_notice(request, "/", f"Deleted {removal.name}")
 
 
 @router.post("/ladders/{name}/runners/bar")

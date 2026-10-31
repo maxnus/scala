@@ -37,7 +37,7 @@ def main(
             case "logout":
                 return run_logout(args)
             case "server":
-                return run_server(args)
+                return run_server(args, parser)
             case "bot":
                 return run_bot_command(args, http=http)
             case "ladder":

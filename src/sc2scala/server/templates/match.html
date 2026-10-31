@@ -22,4 +22,7 @@
       {% if engine_logs %}<tr><th>Engine</th><td><a href="/matches/{{ match.id }}/logs/engine">its logs</a></td></tr>{% endif %}
     </tbody>
   </table>
+  {% if reads_logs and keep_logs_days %}
+    <p class="note">A match's logs are kept {{ keep_logs_days }} days once it ends, and its replay for good.</p>
+  {% endif %}
 {% endblock %}

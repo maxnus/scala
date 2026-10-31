@@ -4,11 +4,14 @@
 {% block main %}
   <h1>{{ bot.name }}</h1>
   <p class="muted">By {{ bot.owner.login }} · {{ bot.race }}</p>
+  {% if bot.retired_at %}
+    <p class="retired">Retired {{ bot.retired_at | when }}: it plays no more, and its matches stay.</p>
+  {% endif %}
   <h2>Ladders</h2>
   {% if ladders %}
     <div class="scrolls">
     <table>
-      <thead><tr><th>Ladder</th><th class="number">Rating</th><th class="number">Games</th><th></th>{% if is_author %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Ladder</th><th class="number">Rating</th><th class="number">Games</th><th></th>{% if may_change %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for entry in ladders %}
           {% set standing = entry.standing %}
@@ -17,14 +20,14 @@
             <td class="number">{% if standing and standing.rating %}{{ standing.displayed_rating }} <span class="muted">± {{ standing.interval }}</span>{% else %}<span class="muted">unrated</span>{% endif %}</td>
             <td class="number">{{ standing.rating.games if standing and standing.rating else 0 }}</td>
             <td class="muted">{{ entry.entry.paused_note }}</td>
-            {% if is_author %}<td class="actions">{{ entry_actions(entry.entry, user, csrf_token, request.url.path, true) }}</td>{% endif %}
+            {% if may_change %}<td class="actions">{{ entry_actions(entry.entry, user, csrf_token, request.url.path, true) }}</td>{% endif %}
           </tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
   {% else %}
-    <p class="muted">In no ladder you may see.</p>
+    <p class="muted">{{ "In no ladder now." if bot.retired_at else "In no ladder you may see." }}</p>
   {% endif %}
   {% if enterable_ladders %}
     <form method="post" action="/bots/{{ bot.name }}/entries" class="row">
@@ -34,7 +37,7 @@
     </form>
   {% endif %}
   <h2>Versions</h2>
-  {% if is_author %}
+  {% if may_change %}
     <form method="post" action="/bots/{{ bot.name }}/versions" enctype="multipart/form-data" class="row">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Zip <input type="file" name="archive" accept=".zip,application/zip" required></label>
@@ -58,4 +61,23 @@
   </table>
   <h2>Latest matches</h2>
   {% include "_matches_table.html" %}
+  {% if may_change %}
+    {% set verb = "Retire" if matches_played else "Delete" %}
+    <details class="removal">
+      <summary>{{ verb }} {{ bot.name }}…</summary>
+      <form method="post" action="/bots/{{ bot.name }}/remove" class="row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <span class="note">
+          {% if matches_played %}
+            It played {{ matches_played }} {{ "match" if matches_played == 1 else "matches" }}, so it is retired rather
+            than deleted: taken out of every ladder, given no new version, and left out of the list of bots. Its
+            matches and ratings stay, and so does its name.
+          {% else %}
+            It never played, so it is deleted, with its versions, and its name is free again. This cannot be undone.
+          {% endif %}
+        </span>
+        <button type="submit" class="secondary">{{ verb }} {{ bot.name }}</button>
+      </form>
+    </details>
+  {% endif %}
 {% endblock %}

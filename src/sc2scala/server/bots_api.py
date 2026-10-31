@@ -1,10 +1,11 @@
-"""The API's bots: uploading a version, listing, reading and downloading them."""
+"""The API's bots: uploading a version, listing, reading and downloading them, and removing one."""
 
+from dataclasses import dataclass
 from typing import Annotated, Any, BinaryIO
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,7 @@ from sc2scala.bot import is_valid_bot_name
 from sc2scala.bot_archive import type_of_bot_archive
 from sc2scala.race import Race
 from sc2scala.server.file_store import FileStore
-from sc2scala.server.models import BotRecord, BotVersion, User
+from sc2scala.server.models import BotRecord, BotVersion, Ladder, LadderEntry, MatchRecord, User, utc_now
 from sc2scala.server.web import DatabaseSession, token_user
 
 router = APIRouter(prefix="/api/bots")
@@ -23,6 +24,16 @@ _MAX_BOT_NAME_LENGTH = 50
 _MEBIBYTE = 1024 * 1024
 
 TokenUser = Annotated[User, Depends(token_user)]
+
+
+@dataclass(frozen=True)
+class Removal:
+    """What removing a bot or a ladder did: deleted it, if it never played a match, or else retired it."""
+
+    name: str
+    retired: bool
+    matches: int
+    """How many matches it played, which keep it."""
 
 
 @router.post("/{name}/versions")
@@ -59,6 +70,8 @@ def upload_bot_version(
             raise HTTPException(422, "A new bot needs a race: T, Z, P or R")
     elif bot.owner_id != user.id:
         raise HTTPException(403, f"{bot.name} is {bot.owner.login}'s")
+    elif bot.retired_at is not None:
+        raise HTTPException(409, f"{bot.name} is retired: it takes no new version")
     bot_race = _race_from(race) if race is not None else None
     config = request.app.state.config
     file_store: FileStore = request.app.state.file_store
@@ -99,6 +112,12 @@ def bot_details(session: DatabaseSession, user: TokenUser, name: str) -> dict[st
     return {**bot_summary(bot), "versions": [version_summary(version) for version in bot.versions]}
 
 
+@router.delete("/{name}")
+def remove_bot(session: DatabaseSession, user: TokenUser, name: str) -> dict[str, Any]:
+    """Deletes the user's bot if it never played a match, or else retires it, as `remove_bot_named` says."""
+    return removal_summary(remove_bot_named(session, user, name))
+
+
 @router.get("/{name}/versions/{number}/archive")
 def download_version(
     request: Request, session: DatabaseSession, user: TokenUser, name: str, number: int
@@ -124,6 +143,49 @@ def commit_or_conflict(session: Session, conflict: str) -> None:
         raise HTTPException(409, conflict) from error
 
 
+def remove_bot_named(session: Session, user: User, name: str) -> Removal:
+    """Deletes the user's bot, its versions with it, if it never played a match, and frees its name; or else retires
+    it, which takes it out of every ladder but the retired ones, whose standings stay as they ended, and keeps its
+    matches, its ratings and its name.
+
+    Raises `HTTPException`: 404 for no such bot, 403 for another's, and 409 for one retired already.
+    """
+    bot = _existing_bot(session, name)
+    if bot.owner_id != user.id:
+        raise HTTPException(403, f"{bot.name} is {bot.owner.login}'s")
+    if bot.retired_at is not None:
+        raise HTTPException(409, f"{bot.name} is retired already")
+    matches = matches_of_bot(session, bot)
+    removal = Removal(name=bot.name, retired=matches > 0, matches=matches)
+    if removal.retired:
+        bot.retired_at = utc_now()
+        open_ladders = select(Ladder.id).where(Ladder.retired_at.is_(None))
+        session.execute(
+            delete(LadderEntry).where(LadderEntry.bot_id == bot.id, LadderEntry.ladder_id.in_(open_ladders))
+        )
+    else:
+        session.delete(bot)
+    session.commit()
+    return removal
+
+
+def matches_of_bot(session: Session, bot: BotRecord) -> int:
+    """How many matches any version of the bot was drawn for, void ones too."""
+    version_ids = [version.id for version in bot.versions]
+    if not version_ids:
+        return 0
+    played = or_(MatchRecord.player_1_version_id.in_(version_ids), MatchRecord.player_2_version_id.in_(version_ids))
+    return session.scalar(select(func.count()).select_from(MatchRecord).where(played)) or 0
+
+
+def removal_summary(removal: Removal) -> dict[str, Any]:
+    return {
+        "name": removal.name,
+        "outcome": "retired" if removal.retired else "deleted",
+        "matches": removal.matches,
+    }
+
+
 def bots_of(session: Session, user: User | None) -> list[BotRecord]:
     """The user's bots, by name; none for nobody."""
     if user is None:
@@ -143,6 +205,7 @@ def bot_summary(bot: BotRecord) -> dict[str, Any]:
         "author": bot.owner.login,
         "race": bot.race,
         "latest_version": latest.number if latest else None,
+        "retired_at": bot.retired_at.isoformat() if bot.retired_at else None,
     }
 
 

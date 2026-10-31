@@ -57,4 +57,26 @@
   </form>
   <h2>Runners</h2>
   <p><a href="/ladders/{{ ladder.name }}/runners">The runner machines that played its matches</a>, where you may bar one.</p>
+  {% if ladder.retired_at %}
+    <p class="retired">Retired {{ ladder.retired_at | when }}: it draws no more matches.</p>
+  {% else %}
+    {% set verb = "Retire" if matches_drawn else "Delete" %}
+    <details class="removal">
+      <summary>{{ verb }} {{ ladder.name }}…</summary>
+      <form method="post" action="/ladders/{{ ladder.name }}/remove" class="row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <span class="note">
+          {% if matches_drawn %}
+            It drew {{ matches_drawn }} {{ "match" if matches_drawn == 1 else "matches" }}, so it is retired rather than
+            deleted: it draws no more matches, takes no new bot, and is left out of the list of ladders. Its standings,
+            as they end, its matches and its name stay.
+          {% else %}
+            It never drew a match, so it is deleted, with its entries and members, and its name is free again. This
+            cannot be undone.
+          {% endif %}
+        </span>
+        <button type="submit" class="secondary">{{ verb }} {{ ladder.name }}</button>
+      </form>
+    </details>
+  {% endif %}
 {% endblock %}

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 
 from sc2scala.errors import UploadRefusedError
-from sc2scala.server.bots_api import bot_named, upload_bot_version
+from sc2scala.server.bots_api import bot_named, remove_bot_named, upload_bot_version
 from sc2scala.server.ladders_api import (
     enter_in_ladder,
     join_with_password,
@@ -90,6 +90,23 @@ def new_version(
         else f"That zip is version {version.number} already, so no version was added"
     )
     return redirect_with_notice(request, f"/bots/{bot.name}", message)
+
+
+@router.post("/bots/{name}/remove")
+def remove_bot(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, csrf_token: CsrfToken
+) -> RedirectResponse:
+    """Deletes the user's bot if it never played, or else retires it, from the bot's page."""
+    check_csrf(request, csrf_token)
+    try:
+        removal = remove_bot_named(session, user, name)
+    except HTTPException as error:
+        return redirect_with_notice(request, f"/bots/{name}", refusal_reason(error), refused=True)
+    if removal.retired:
+        return redirect_with_notice(
+            request, f"/bots/{removal.name}", f"Retired {removal.name}: it plays no more, and its matches stay"
+        )
+    return redirect_with_notice(request, "/account", f"Deleted {removal.name}")
 
 
 @router.post("/bots/{name}/entries")

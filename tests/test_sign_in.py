@@ -45,7 +45,8 @@ def test_a_name_github_could_not_give_is_refused(server: TestClient) -> None:
 
 def test_a_server_without_the_dev_sign_in_refuses_it(tmp_path: Path) -> None:
     with TestClient(
-        create_app(server_config_in(tmp_path / "server", dev_sign_in=False)), base_url="http://localhost"
+        create_app(server_config_in(tmp_path / "server", dev_sign_in=False), tidies_storage=False),
+        base_url="http://localhost",
     ) as server:
         assert "Dev sign-in" not in server.get("/sign-in").text
         response = server.post("/sign-in/dev", data={"login": "alice", "csrf_token": "any"})

@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from sc2scala.bot_commands import removal_line
+from sc2scala.command_confirmation import confirm_at_terminal
 from sc2scala.errors import ScalaError
 from sc2scala.scala_client import ScalaClient
 from sc2scala.signed_in_client import signed_in_client
@@ -15,7 +17,7 @@ from sc2scala.signed_in_client import signed_in_client
 def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
     """Adds `ladder` and its subcommands to the commands whose `add_parser` this is."""
     ladder = add_parser(
-        "ladder", help="make, join and enter ladders", description="Makes, changes, joins and enters ladders."
+        "ladder", help="make, join and enter ladders", description="Makes, changes, removes, joins and enters ladders."
     )
     ladder.add_argument("--server", help="the server (default: the last one signed in to)")
     commands = ladder.add_subparsers(dest="ladder_command", required=True)
@@ -35,6 +37,16 @@ def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     )
     protection.add_argument("--unprotect", action="store_true", help="remove the password")
     _add_limit_argument(change)
+    remove = commands.add_parser(
+        "remove",
+        help="delete your ladder, or retire it if it drew matches",
+        description=(
+            "Deletes your ladder, with its entries and members, if it never drew a match, and frees its name; or else "
+            "retires it: it draws no more matches and takes no new bot, and its standings, matches and name stay."
+        ),
+    )
+    remove.add_argument("name")
+    remove.add_argument("--yes", action="store_true", help="remove it without asking")
     join = commands.add_parser("join", help="join a protected ladder with its password")
     join.add_argument("name")
     for subcommand, help_text in [
@@ -98,6 +110,13 @@ def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -
                 limits=dict(args.limit),
             )
             print(_description_of(changed))
+        case "remove":
+            confirm_at_terminal(
+                f"Remove {args.name}? It is deleted if it never drew a match, or else retired, its matches kept.",
+                assume_yes=args.yes,
+            )
+            removed = client.remove_ladder(args.name)
+            print(removal_line(removed, played="drew", stays="it draws no more, and keeps its standings and matches"))
         case "join":
             print(_description_of(_join(client, args.name)))
         case "enter":
@@ -177,7 +196,7 @@ def _join(client: ScalaClient, name: str) -> dict[str, Any]:
 
 
 def _summary_line(ladder: dict[str, Any]) -> str:
-    access = "protected" if ladder["protected"] else "public"
+    access = ("protected" if ladder["protected"] else "public") + (", retired" if ladder.get("retired_at") else "")
     if "bots" not in ladder:
         return f"{ladder['name']}: {access}, by {ladder['owner']}"
     member = ", you are a member" if ladder["protected"] and ladder["member"] else ""

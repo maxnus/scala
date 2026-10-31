@@ -47,8 +47,8 @@ unless you give one after `register`; if you have a machine of that name already
 when you set it up again. Signed in instead, by `sc2scala login https://scala.example.org`, `runner register NAME`
 registers it too, serving every public ladder and the ladders given with `--ladders`. `login` shows a code and opens
 the server's page in your browser, where you sign in and confirm the same code; with `--no-browser`, as over SSH, it
-shows the page's address for you to open elsewhere. `sc2scala runner remove`, with no name, removes this computer from
-the server, by its own token.
+shows the page's address for you to open elsewhere. A computer is one machine: `sc2scala runner remove`, with no name,
+removes it from the server, by its own token, before it registers anew.
 
 `runner register` writes the machine's settings to `~/.config/sc2scala/runner.toml`: how many matches it plays at
 once, 1 at first, with how many fit

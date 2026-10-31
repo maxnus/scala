@@ -26,11 +26,14 @@
       machine of yours, serving the ladders ticked: it works once, within an hour, and needs no other sign-in on the
       machine.
     </p>
+    {% if refusal %}
+      <p class="notice refused" role="alert">{{ refusal }}</p>
+    {% endif %}
     <form method="post" action="/runners/add" class="stacked">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label><input type="checkbox" name="serves_public" value="true"{% if not from_ladder %} checked{% endif %}> every public ladder</label>
+      <label><input type="checkbox" name="serves_public" value="true"{% if ticked_public %} checked{% endif %}> every public ladder</label>
       {% for ladder in servable_ladders %}
-        <label><input type="checkbox" name="ladders" value="{{ ladder.name }}"{% if from_ladder and ladder.id == from_ladder.id %} checked{% endif %}> {{ ladder.name }}{% if ladder.is_protected %} <span class="muted">(protected)</span>{% endif %}</label>
+        <label><input type="checkbox" name="ladders" value="{{ ladder.name }}"{% if ladder.name in ticked_ladders %} checked{% endif %}> {{ ladder.name }}{% if ladder.is_protected %} <span class="muted">(protected)</span>{% endif %}</label>
       {% endfor %}
       <button type="submit">Make a setup code</button>
     </form>

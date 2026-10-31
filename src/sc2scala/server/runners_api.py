@@ -18,7 +18,7 @@ from sc2scala.server.web import DatabaseSession, token_user
 
 router = APIRouter(prefix="/api/runners")
 
-MACHINE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,39}")
+_MACHINE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,39}")
 
 TokenUser = Annotated[User, Depends(token_user)]
 
@@ -40,15 +40,12 @@ def register_machine(session: DatabaseSession, user: TokenUser, registration: Ma
 
     Answers with the machine's token, once.
     """
-    if not MACHINE_NAME_PATTERN.fullmatch(registration.name):
-        raise HTTPException(422, f"A machine's name is letters, digits and '-', 40 at most, not {registration.name!r}")
+    check_machine_name(registration.name)
     if machine_named(session, user, registration.name) is not None:
         raise HTTPException(409, f"You have a machine named {registration.name} already")
-    token = new_runner_token()
-    machine = RunnerMachine(
-        owner_id=user.id,
-        name=registration.name,
-        token_hash=hash_of_token(token),
+    machine, token = new_machine(
+        user,
+        registration.name,
         serves_public=registration.serves_public,
         ladders=ladders_named(session, registration.ladders, user),
     )
@@ -90,6 +87,22 @@ def change_machine_settings(
         machine.ladders = ladders_named(session, ladders, user)
     session.commit()
     return machine
+
+
+def check_machine_name(name: str) -> None:
+    """Raises 422 unless `name` is a machine's name: letters, digits and '-', 40 at most."""
+    if not _MACHINE_NAME_PATTERN.fullmatch(name):
+        raise HTTPException(422, f"A machine's name is letters, digits and '-', 40 at most, not {name!r}")
+
+
+def new_machine(user: User, name: str, *, serves_public: bool, ladders: list[Ladder]) -> tuple[RunnerMachine, str]:
+    """A new machine of the user's, not yet in a session, with a new token, which it keeps as its hash; and the
+    token."""
+    token = new_runner_token()
+    machine = RunnerMachine(
+        owner_id=user.id, name=name, token_hash=hash_of_token(token), serves_public=serves_public, ladders=ladders
+    )
+    return machine, token
 
 
 def remove_machine_named(session: Session, user: User, name: str) -> None:

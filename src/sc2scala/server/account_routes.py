@@ -40,7 +40,9 @@ def create_token(
     session.add(ApiToken(user_id=user.id, name=name, token_hash=hash_of_token(token)))
     session.commit()
     session.refresh(user)
-    return _render_account(request, session, user, new_token=token, new_token_name=name)
+    page = _render_account(request, session, user, new_token=token, new_token_name=name)
+    page.headers["Cache-Control"] = "no-store"
+    return page
 
 
 @router.post("/account/tokens/{token_id}/delete")

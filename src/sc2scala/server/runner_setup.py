@@ -9,23 +9,25 @@ from datetime import timedelta
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from sc2scala.api_tokens import hash_of_token, new_runner_token, new_setup_code
 from sc2scala.server.bots_api import commit_or_conflict
 from sc2scala.server.ladders_api import visible_ladders
-from sc2scala.server.models import RunnerMachine, RunnerSetupCode, User, utc_now
+from sc2scala.server.models import Ladder, RunnerMachine, RunnerSetupCode, User, utc_now
 from sc2scala.server.runners_api import (
-    MACHINE_NAME_PATTERN,
+    check_machine_name,
     ladders_named,
     machine_named,
     machine_summary,
+    new_machine,
     void_leased_matches,
 )
-from sc2scala.server.web import DatabaseSession, check_csrf, redirect_with_notice, refusal_reason, render, required_user
+from sc2scala.server.web import DatabaseSession, check_csrf, refusal_reason, render, required_user
 
 router = APIRouter()
 
@@ -50,12 +52,16 @@ def add_runner_page(request: Request, session: DatabaseSession, user: SignedInUs
     """The form that makes a setup code: every public ladder ticked, or, from a ladder's page, that ladder alone."""
     servable_ladders = visible_ladders(session, user)
     from_ladder = next((each for each in servable_ladders if each.name.lower() == ladder.lower()), None)
-    return render(
-        request, "runner_add.html", user=user, servable_ladders=servable_ladders, from_ladder=from_ladder, code=None
+    return _render_form(
+        request,
+        user,
+        servable_ladders,
+        ticked_public=from_ladder is None,
+        ticked_ladders={from_ladder.name} if from_ladder else set(),
     )
 
 
-@router.post(_ADD_RUNNER_PAGE, response_model=None)
+@router.post(_ADD_RUNNER_PAGE, response_class=HTMLResponse)
 def make_setup_code(
     request: Request,
     session: DatabaseSession,
@@ -63,15 +69,26 @@ def make_setup_code(
     csrf_token: Annotated[str, Form()],
     serves_public: Annotated[bool, Form()] = False,
     ladders: Annotated[list[str], Form()] = [],  # noqa: B006, FastAPI copies a form's default for each request
-) -> HTMLResponse | RedirectResponse:
+) -> HTMLResponse:
     """Makes a setup code for a machine serving every public ladder if `serves_public`, and `ladders`; the page that
-    answers shows it, and never again."""
+    answers shows it, and never again, nor keeps it in the browser's cache. A refused form comes back as it was sent,
+    with why."""
     check_csrf(request, csrf_token)
     try:
         code, setup_code = create_setup_code(session, user, serves_public=serves_public, ladder_names=ladders)
     except HTTPException as error:
-        return redirect_with_notice(request, _ADD_RUNNER_PAGE, refusal_reason(error), refused=True)
-    return render(request, "runner_add.html", user=user, code=code, setup_code=setup_code)
+        return _render_form(
+            request,
+            user,
+            visible_ladders(session, user),
+            ticked_public=serves_public,
+            ticked_ladders=set(ladders),
+            refusal=refusal_reason(error),
+            status_code=error.status_code,
+        )
+    page = render(request, "runner_add.html", user=user, code=code, setup_code=setup_code)
+    page.headers["Cache-Control"] = "no-store"
+    return page
 
 
 @router.post("/api/runners/setup")
@@ -85,6 +102,29 @@ def register_by_setup_code_route(session: DatabaseSession, exchange: SetupCodeEx
         session, code=exchange.setup_code, name=exchange.name, replace=exchange.replace
     )
     return {**machine_summary(session, machine), "token": token}
+
+
+def _render_form(
+    request: Request,
+    user: User,
+    servable_ladders: list[Ladder],
+    *,
+    ticked_public: bool,
+    ticked_ladders: set[str],
+    refusal: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    return render(
+        request,
+        "runner_add.html",
+        user=user,
+        servable_ladders=servable_ladders,
+        ticked_public=ticked_public,
+        ticked_ladders=ticked_ladders,
+        refusal=refusal,
+        code=None,
+        status_code=status_code,
+    )
 
 
 def create_setup_code(
@@ -127,14 +167,15 @@ def register_by_setup_code(session: Session, *, code: str, name: str, replace: b
     was playing, which the computer it was will not report, are void. 404, 409 and 422 as the route says, and 403, 404
     or 409 for a ladder of the code's the user may no longer serve; the code stays unused after a refusal.
     """
-    if not MACHINE_NAME_PATTERN.fullmatch(name):
-        raise HTTPException(422, f"A machine's name is letters, digits and '-', 40 at most, not {name!r}")
+    check_machine_name(name)
     setup_code = session.scalar(select(RunnerSetupCode).where(RunnerSetupCode.code_hash == hash_of_token(code.strip())))
     if setup_code is None or setup_code.expires_at < utc_now():
         raise HTTPException(404, _NO_SUCH_CODE)
     user = setup_code.user
     serves_public = setup_code.serves_public
     ladders = ladders_named(session, [ladder.name for ladder in setup_code.ladders], user)
+    if not serves_public and not ladders:
+        raise HTTPException(409, "The ladders this setup code was for are gone: make another")
     machine = machine_named(session, user, name)
     if machine is not None and not replace:
         raise HTTPException(
@@ -146,16 +187,18 @@ def register_by_setup_code(session: Session, *, code: str, name: str, replace: b
     if used.rowcount != 1:
         session.rollback()
         raise HTTPException(404, _NO_SUCH_CODE)
-    token = new_runner_token()
     if machine is None:
-        machine = RunnerMachine(
-            owner_id=user.id, name=name, token_hash=hash_of_token(token), serves_public=serves_public, ladders=ladders
-        )
+        machine, token = new_machine(user, name, serves_public=serves_public, ladders=ladders)
         session.add(machine)
     else:
         void_leased_matches(session, machine, because="its runner machine was set up again")
+        token = new_runner_token()
         machine.token_hash = hash_of_token(token)
         machine.serves_public = serves_public
         machine.ladders = ladders
-    commit_or_conflict(session, f"Another machine named {name} was registered at the same moment; try again")
+    try:
+        commit_or_conflict(session, f"Another machine named {name} was registered at the same moment; try again")
+    except StaleDataError as error:
+        session.rollback()
+        raise HTTPException(409, f"{user.login}'s machine {name} was removed at the same moment; try again") from error
     return machine, token

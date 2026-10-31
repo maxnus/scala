@@ -44,6 +44,8 @@ def test_runner_register_writes_the_machines_settings_once(
     config_file = folders / "xdg_config_home" / "sc2scala" / "runner.toml"
     assert "runners = 1" in config_file.read_text(encoding="utf-8")
     config_file.write_text("runners = 3\n", encoding="utf-8")
+    assert main(["runner", "register", "study"], http=registered.server) == 1, "this computer is laptop already"
+    assert main(["runner", "remove"], http=registered.server) == 0
     capsys.readouterr()
     main(["runner", "register", "study"], http=registered.server)
     assert f"It plays 3 matches at once, at any hour, as {config_file} says" in capsys.readouterr().out

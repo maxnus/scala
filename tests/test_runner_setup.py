@@ -85,7 +85,7 @@ def test_from_a_ladders_page_the_form_ticks_that_ladder_alone(ladder: LadderWith
 def test_a_setup_code_registers_one_machine_serving_what_it_says(ladder: LadderWithBots) -> None:
     server = ladder.server
     page = add_runner_form(server, "alice", ladders=["league"]).text
-    assert "serving\n        league." in page
+    assert "serving league." in " ".join(page.split())
     assert "--server http://localhost --setup-code scala_setup_" in page
     code = _SETUP_CODE_IN_PAGE.search(page).group(1)  # type: ignore[union-attr]
     registered = exchange(server, code)
@@ -147,9 +147,26 @@ def test_a_user_holds_ten_unused_setup_codes_at_most(ladder: LadderWithBots) -> 
     server = ladder.server
     for _ in range(MOST_SETUP_CODES_WAITING):
         setup_code_of(server, "alice")
-    refused = add_runner_form(server, "alice", serves_public="true")
+    refused = add_runner_form(server, "alice", ladders=["league"])
+    assert refused.status_code == 429
     assert notice_of(refused.text).startswith(f"You hold {MOST_SETUP_CODES_WAITING} unused setup codes")
+    assert 'name="serves_public" value="true">' in refused.text, "the form comes back as it was sent"
+    assert 'name="ladders" value="league" checked>' in refused.text
     setup_code_of(server, "bob")
+
+
+def test_the_code_page_stays_out_of_the_browsers_cache(ladder: LadderWithBots) -> None:
+    assert add_runner_form(ladder.server, "alice", serves_public="true").headers["Cache-Control"] == "no-store"
+
+
+def test_a_setup_code_whose_ladders_are_gone_registers_nothing(ladder: LadderWithBots) -> None:
+    server = ladder.server
+    create_ladder(server, ladder.alice, "spare")
+    code = setup_code_of(server, "alice", serves_public=False, ladders=("spare",))
+    assert server.delete("/api/ladders/spare", headers=ladder.alice).status_code == 200
+    response = exchange(server, code)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "The ladders this setup code was for are gone: make another"
 
 
 def test_a_machine_removes_itself_by_its_token(ladder: LadderWithBots) -> None:
@@ -198,10 +215,15 @@ def test_runner_register_by_a_setup_code_needs_no_sign_in(
     assert (folders / "xdg_config_home" / "sc2scala" / "runner.toml").exists()
     again = setup_code_of(server, "alice")
     assert main(["runner", "register", "--server", "http://localhost", "--setup-code", again], http=server) == 1
-    assert "alice has a machine named Max-Desk already" in capsys.readouterr().err
+    assert "This computer is the runner machine Max-Desk on http://localhost already" in capsys.readouterr().err
     replace = ["runner", "register", "--server", "http://localhost", "--setup-code", again, "--replace"]
     assert main(replace, http=server) == 0
     assert machines_of(server, ladder.alice)["Max-Desk"]["serves_public"] is True
+    no_public = ["runner", "register", "--server", "http://localhost", "--setup-code", again, "--no-public"]
+    assert main(no_public, http=server) == 1
+    assert "leave out --ladders and --no-public" in capsys.readouterr().err
+    assert main(["runner", "register", "study", "--replace"], http=server) == 1
+    assert "--replace goes with --setup-code" in capsys.readouterr().err
 
 
 def test_runner_remove_with_no_name_removes_this_computer(
@@ -219,3 +241,22 @@ def test_runner_remove_with_no_name_removes_this_computer(
     assert not (folders / "xdg_config_home" / "sc2scala" / "runner.json").exists()
     assert main(["runner", "remove"], http=server) == 1
     assert "This computer is no runner machine yet" in capsys.readouterr().err
+
+
+def test_runner_remove_forgets_a_machine_removed_on_the_pages(
+    ladder: LadderWithBots, folders: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    server = ladder.server
+    code = setup_code_of(server, "alice")
+    assert main(["runner", "register", "attic", "--server", "http://localhost", "--setup-code", code], http=server) == 0
+    assert server.delete("/api/runners/attic", headers=ladder.alice).status_code == 200
+    service_file = folders / "xdg_config_home" / "systemd" / "user" / "sc2scala-runner.service"
+    service_file.parent.mkdir(parents=True)
+    service_file.write_text("[Service]\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["runner", "remove"], http=server) == 0
+    assert capsys.readouterr().out == (
+        "http://localhost knows attic no longer, removed already; forgot its token\n"
+        "Its service would fail now: `systemctl --user disable --now sc2scala-runner` turns it off\n"
+    )
+    assert not (folders / "xdg_config_home" / "sc2scala" / "runner.json").exists()

@@ -16,7 +16,7 @@ from loguru import logger
 
 from sc2scala.aiarena_engine import AiArenaEngine
 from sc2scala.client_credentials import ClientCredentials, default_credentials_file
-from sc2scala.errors import ScalaError
+from sc2scala.errors import ScalaError, ServerError
 from sc2scala.match_engine import MatchEngine
 from sc2scala.runner import Runner
 from sc2scala.runner_config import (
@@ -146,14 +146,15 @@ def _register(args: argparse.Namespace, *, http: httpx.Client | None) -> None:
     config_file = default_runner_config_file()
     RunnerConfig.load(config_file)
     name = args.name or machine_name_for_host(socket.gethostname())
+    if args.setup_code and (args.ladders or args.no_public):
+        raise ScalaError("A setup code says which ladders the machine serves: leave out --ladders and --no-public")
+    if args.replace and not args.setup_code:
+        raise ScalaError("--replace goes with --setup-code; signed in, remove the machine first")
+    _refuse_a_second_machine(name, replace=args.replace)
     if args.setup_code:
-        if args.ladders or args.no_public:
-            raise ScalaError("A setup code says which ladders the machine serves: leave out --ladders and --no-public")
         client = ScalaClient(_setup_server(args.server), "", http=http)
         machine = client.register_by_setup_code(args.setup_code, name, replace=args.replace)
     else:
-        if args.replace:
-            raise ScalaError("--replace goes with --setup-code; signed in, remove the machine first")
         client = signed_in_client(args.server, http=http)
         machine = client.register_machine(name, serves_public=not args.no_public, ladders=args.ladders)
     RunnerCredentials(server_url=client.server_url, machine=machine["name"], token=machine["token"]).save()
@@ -179,6 +180,20 @@ def machine_name_for_host(host_name: str) -> str:
     return name or _FALLBACK_MACHINE_NAME
 
 
+def _refuse_a_second_machine(name: str, *, replace: bool) -> None:
+    """Raises `ScalaError` if this computer is a runner machine already, unless `replace` names that machine: its
+    token, overwritten, would leave a machine on the server that nobody runs."""
+    if not default_runner_file().exists():
+        return
+    current = RunnerCredentials.load()
+    if replace and current.machine == name:
+        return
+    raise ScalaError(
+        f"This computer is the runner machine {current.machine} on {current.server_url} already: remove it first, "
+        "with `sc2scala runner remove`, or register it again under its name with a setup code and --replace"
+    )
+
+
 def _setup_server(server_url: str | None) -> str:
     """The server a setup code is for: `server_url`, else the last one signed in to; raises `ScalaError` if neither."""
     server_url = server_url or ClientCredentials.load().default_server
@@ -188,14 +203,22 @@ def _setup_server(server_url: str | None) -> str:
 
 
 def _remove_this_machine(*, http: httpx.Client | None) -> int:
-    """Removes the runner machine this computer is, by its token, and forgets it; returns 1 while its runner runs."""
+    """Removes the runner machine this computer is, by its token, and forgets it, as it does a token the server refuses,
+    since the machine was removed on the pages; returns 1 while its runner runs."""
     if running_runner(_data_home() / _LOCK_FILE_NAME) is not None:
         print("The runner is running: stop it first, with `sc2scala runner stop`")
         return 1
     credentials = RunnerCredentials.load()
-    removed = ScalaClient(credentials.server_url, credentials.token, http=http).remove_this_machine()
+    try:
+        removed = ScalaClient(credentials.server_url, credentials.token, http=http).remove_this_machine()
+        print(f"Removed {removed['removed']} from {credentials.server_url}; the matches it was playing are void")
+    except ServerError as error:
+        if error.status_code != 401:
+            raise
+        print(f"{credentials.server_url} knows {credentials.machine} no longer, removed already; forgot its token")
     default_runner_file().unlink()
-    print(f"Removed {removed['removed']} from {credentials.server_url}; the matches it was playing are void")
+    if (_config_home() / "systemd" / "user" / f"{_SERVICE_NAME}.service").exists():
+        print(f"Its service would fail now: `systemctl --user disable --now {_SERVICE_NAME}` turns it off")
     return 0
 
 

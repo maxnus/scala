@@ -67,8 +67,9 @@ removes it from the server, by its own token, before it registers anew.
 `runner register` writes the machine's settings to `~/.config/sc2scala/runner.toml`: how many matches it plays at
 once, 1 at first, with how many fit
 this machine in a comment; how many GiB of bots and maps it keeps, 20; and the weekly windows in which it plays, at any
-hour at first, with an example of nights and weekends. `runner start` reads them, downloads the engine's images first if
-Docker lacks them, about 11 GB, and plays. It keeps bots and maps in `~/.cache/sc2scala`, plays each match in
+hour at first, with an example of nights and weekends. `engine = "scala"` there makes it play with Scala's own engine,
+which is being tried, rather than AI Arena's. `runner start` reads them, downloads the engine's images first if Docker
+lacks them, about 11 GB, and plays. It keeps bots and maps in `~/.cache/sc2scala`, plays each match in
 `~/.local/share/sc2scala/work`, and reports its result, replay and logs. `sc2scala runner stop`, or Ctrl-C, stops it
 once the matches being played end; `runner stop --now`, or a second Ctrl-C, stops them too, which voids them.
 
@@ -112,7 +113,8 @@ uv run sc2scala play path/to/MyBot path/to/OtherBot --map path/to/PylonAIE_v4.SC
 
 A bot is a folder named for it, in AI Arena's layout, as above. The match is written to `matches/<time>-<bot>-vs-<bot>`,
 or the empty folder `--output` names: `result.json`, the replay, and `logs`, which holds each bot's own logs in
-`player_1-<name>` and `player_2-<name>`, and the engine's.
+`player_1-<name>` and `player_2-<name>`, and the engine's. `--engine scala` plays it with Scala's own engine, which
+step 8 of [the plan](docs/plan.md) brings in, rather than AI Arena's.
 
 ## Running a server
 

@@ -22,9 +22,10 @@ takes 1 core and 1 GiB. A ladder sets all of these in its `ResourceLimits`.
 A Windows bot does not play: AI Arena's v0.8.0 bot image holds no Wine, and `sc2scala play` refuses one.
 
 The sandbox does not guard against a bot that exploits the kernel itself, which only a stronger layer, such as gVisor,
-would. Nor does it make machines alike: a bot that budgets by the clock plays differently on a slower one. The match
-controller tells the two bots apart by the port each connects from, so a bot that guessed its opponent's could try to
-pose as it; no test tries that yet.
+would. Nor does it make machines alike: a bot that budgets by the clock plays differently on a slower one. AI Arena's
+match controller tells the two bots apart by the port each connects from, so a bot that guessed its opponent's could
+try to pose as it. Scala's takes a seat's connection only from the address of that seat's bot, which a bot with no
+capabilities cannot forge, and runs from a copy of its own code alone, mounted read-only.
 
 ## A runner of its own, with rootless Docker
 

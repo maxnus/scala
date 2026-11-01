@@ -102,6 +102,19 @@ def test_the_owner_changes_the_limits_which_must_fit(ladder: LadderWithBots) -> 
     assert 'name="bot_processes" value="1024"' in server.get(settings).text
 
 
+def test_the_owner_sets_a_step_time_limit_and_takes_it_off_by_leaving_it_empty(ladder: LadderWithBots) -> None:
+    server = ladder.server
+    sign_in_dev(server, "alice")
+    settings = "/ladders/league/settings"
+    assert 'name="max_step_time_ms" value="" placeholder="none"' in server.get(settings).text
+    page = submit(server, settings, "/ladders/league/limits", {"max_step_time_ms": "40", "step_time_strikes": "3"})
+    assert "Changed the limits" in page.text
+    assert details_of(ladder)["game_limits"]["max_step_time_ms"] == 40
+    assert 'name="max_step_time_ms" value="40" placeholder="none"' in server.get(settings).text
+    submit(server, settings, "/ladders/league/limits", {"max_step_time_ms": "", "step_time_strikes": "3"})
+    assert details_of(ladder)["game_limits"]["max_step_time_ms"] is None
+
+
 def test_the_forms_take_every_limit_the_pages_show() -> None:
     shown = [field.name for _, group in LIMIT_GROUPS for field in group]
     assert list(inspect.signature(limit_changes_from_form).parameters) == shown

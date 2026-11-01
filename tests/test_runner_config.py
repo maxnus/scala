@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -113,6 +114,7 @@ def test_days_are_listed_and_ranged_and_a_toml_time_is_a_time(tmp_path: Path) ->
         ('[[window]]\nfrom = "07:00"\nto = "07:00"', "a window does not end as it starts, at 07:00"),
         ('[[window]]\nuntil = "07:00"', "no window setting is named 'until'"),
         ("runners = ", "is no TOML"),
+        ('engine = "wine"', "engine is one of 'aiarena', 'scala', not 'wine'"),
     ],
 )
 def test_a_config_that_does_not_fit_is_refused_naming_its_file(tmp_path: Path, text: str, complaint: str) -> None:
@@ -128,7 +130,13 @@ def test_the_config_register_writes_holds_the_defaults_and_an_example_that_reads
     uncommented = "\n".join(
         line.removeprefix("# ") if "=" in line or "[[" in line else line for line in text.splitlines()
     )
-    assert config_of(tmp_path, uncommented) == config_of(tmp_path, "\n".join(_NIGHTS_AND_WEEKENDS.splitlines()[3:]))
+    example = config_of(tmp_path, "\n".join(_NIGHTS_AND_WEEKENDS.splitlines()[3:]))
+    assert config_of(tmp_path, uncommented) == replace(example, engine="scala")
+
+
+def test_the_engine_is_ai_arena_s_unless_scala_s_is_named(tmp_path: Path) -> None:
+    assert config_of(tmp_path, "runners = 2").engine == "aiarena"
+    assert config_of(tmp_path, 'engine = "scala"').engine == "scala"
 
 
 @pytest.mark.parametrize(("cores", "memory_gib", "runners"), [(32, 59, 7), (32, 128, 8), (8, 16, 2), (2, 4, 1)])

@@ -159,7 +159,8 @@ def _add_limit_argument(parser: argparse.ArgumentParser) -> None:
         type=_limit_from_text,
         default=[],
         metavar="NAME=VALUE",
-        help="a limit of its matches, such as bot_memory_mib=2048; repeat for several",
+        help="a limit of its matches, such as bot_memory_mib=2048, or max_step_time_ms=off for none; repeat for "
+        "several",
     )
 
 
@@ -209,7 +210,8 @@ def _description_of(ladder: dict[str, Any]) -> str:
         "Maps: " + ", ".join(map_file["name"] for map_file in ladder["maps"]),
         "Limits: "
         + ", ".join(
-            f"{name}={value}" for name, value in {**ladder["game_limits"], **ladder["resource_limits"]}.items()
+            f"{name}={'off' if value is None else value}"
+            for name, value in {**ladder["game_limits"], **ladder["resource_limits"]}.items()
         ),
     ]
     for entry in ladder["entries"]:

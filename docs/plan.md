@@ -253,13 +253,17 @@ The match controller does what AI Arena's does, as its v0.8.0 source shows:
 
 - it creates the game itself, with a seat for each bot, or for the bot and [the computer](#computer-opponents);
 - it passes each bot's `JoinGame` on with its seat's race, its name and the match's ports, or no ports for a bot that
-  plays the computer, alone in its game, then each of its requests to the game and the answer back;
-- it answers a debug request itself, with an empty answer, so that no bot cheats;
+  plays the computer, alone in its game, and with raw actions affecting the selection, as AI Arena's sets them; then
+  each of its requests to the game and the answer back;
+- it answers a debug request itself, with an empty answer, so that no bot cheats, and takes out of an observation
+  request the ask to lift the fog of war, which beside the join's options to show cloaked units would show the
+  opponent's units through it;
 - in the game's information, it names both players, and shows the opponent's race as requested, so that a random
   opponent stays random;
 - it ends a game that reaches its game time as a tie, and saves the replay however the game ends;
 - it decides the result: the game's; a crash for a bot whose connection breaks; a time-out for one that sends nothing
-  for 30 seconds; and a loss for one that leaves the game;
+  for 30 seconds; a loss for one that leaves the game; and an initialization error for one that does not connect
+  within 30 seconds of its start, or fails before both have joined;
 - it reports the game's steps, and each bot's average step time, its own time between the game's answers and its next
   requests over the game's steps, as AI Arena's counts it.
 
@@ -268,13 +272,21 @@ to one step request to its next, less the time the game took meanwhile to answer
 than `max_step_time_ms` is a strike, and a bot that reaches `step_time_strikes` loses by a time-out. The results stay
 those of the table above.
 
-The images are AI Arena's, at tags Scala pins; the bot environment's is Scala's choice, v0.8.0 as now or v0.9.0 as
-aiarena.net's, which step 8a settles by trying bots on both. The match controller runs from an image the runner pulls
-anyway, the bot environment's say, whose Python, 3.12 in v0.8.0, runs Scala's code, so that Scala publishes no image of
-its own;
-which image, step 8a settles too. Its code and the few packages it needs are copied into the match's work folder and
-mounted read-only from there, and nothing else of the runner's: not its home, its install, its config or its token,
-since every bot reaches that container.
+It also joins the second seat of a bot that plays itself under its name and ` (2)`: the game makes two clients that join
+under one name one player, both controlling player 1 while player 2 stands idle (in game, 4.10, found in step 8a), which
+AI Arena's engine, naming each player for its bot, does not guard against. Each bot is still told the names as the match
+has them.
+
+The images are AI Arena's, at tags Scala pins: its game image, whose own controller is left unused, and its bot
+environment, `arenaclient-bot-base`. Step 8a tried bots of every type on its v0.8.0 and on aiarena.net's v0.9.0, and all
+played on both: v0.9.0 differs in its Python packages alone, dropping `pysc2`, the old `s2clientprotocol` and
+`websocket-client`, which a bot on `sc2nachos` must then bring itself. Scala's engine pins v0.8.0 while AI Arena's
+engine stays, since it shares every layer with AI Arena's bot image, so that a runner downloads nothing more for it, and
+both engines play bots in the same environment; step 8c moves it to v0.9.0, which a runner then downloads, about 11 GB,
+in place of AI Arena's images. The match controller runs from the bot environment's image, whose Python, 3.12, runs
+Scala's code, so that Scala publishes no image of its own. Its code and the few packages it needs are copied into the
+match's work folder and mounted read-only from there, and nothing else of the runner's: not its home, its install, its
+config or its token, since every bot reaches that container.
 
 The match controller is tested in-process, against a fake game and fake bots, for each way a game can end, with no
 Docker; tests that start containers are marked `integration`, as now. Until step 8c, AI Arena's engine stays, chosen
@@ -418,13 +430,16 @@ Each step ends in something that runs, and is a pull request of its own.
      2026-11-01, set up by the command, and waits for the ladder's bots.
 8. **Scala's own engine, and computer opponents**, as [the engine](#the-engine) and
    [computer opponents](#computer-opponents) say, in three pull requests:
-   - 8a: Scala's engine playing bot against bot, with a ladder's step-time limit applied where it sets one, off by
-     default, and the ladder's pages to set it; tried with bots of every type in `sc2scala play`. AI Arena's stays
-     the default until 8c, and a runner plays with Scala's by `engine` in its `runner.toml`, as max-9950 does on
-     test-ladder; `runner pull` fetches the images of both, which the setup script's check of free space allows for.
+   - 8a, built: Scala's engine playing bot against bot, with a ladder's step-time limit applied where it sets one, off
+     by default, and the ladder's pages to set it. `tools/try_engines.py` played AI Arena's test bots on both engines,
+     Python on python-sc2, Java, Node.js and a Linux binary, and each way a match can end, and both decided alike in
+     every case; a .NET bot written for the trial and NachOS's demo bot, on `sc2nachos`, played on both too. AI Arena's
+     engine stays the default until 8c, and a runner plays with Scala's by `engine` in its `runner.toml`, as max-9950 is
+     to on test-ladder; `runner pull` fetches the images of both, and Scala's adds nothing to download.
    - 8b: computer opponents, on the server, its pages and the CLI, in the draw and the ratings, and in the engine.
-   - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's
-     machines; `runner pull`, the setup script and the guides then fetch only the images Scala's uses.
+   - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's machines;
+     `runner pull`, the setup script and the guides then fetch only the images Scala's uses, its bot environment moved
+     to v0.9.0, as [the engine](#the-engine) says.
 
 ## Open
 
@@ -433,7 +448,8 @@ Each step ends in something that runs, and is a pull request of its own.
   before Scala goes on PyPI, from which strangers' runners install it.
 - **Updating runners**: running the setup command again updates one. The server could tell a runner that its Scala is
   too old for it, once a change needs every runner updated; step 8b's runner naming its engine is a start.
-- **Which bots try each type** in step 8a: open-source ones, whose licenses let a runner play them.
+- **Which bots play test-ladder** before step 8c, one of each type, whose licenses let a runner play them: AI Arena's
+  test bots, which step 8a tried, state no license.
 - **A random computer's race**, read from the replay once the match is over, for the match's page.
 - **Other Linux distributions** for the setup script, once someone asks. Debian 13 should take it, where Debian 12's
   packages hold no Compose 2.20, which the engine needs; Fedora and Arch have rootless Docker too.

@@ -1,17 +1,20 @@
 """The file store, the bot zip's checks, the passwords and the limits, apart from the routes that use them."""
 
 import io
+import json
 from pathlib import Path
 
 import pytest
+from alembic import command
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from sc2scala.bot_archive import type_of_bot_archive
 from sc2scala.bot_type import BotType
 from sc2scala.errors import UploadRefusedError, UploadTooLargeError
 from sc2scala.server.bots_api import commit_or_conflict
-from sc2scala.server.database import create_database_engine, upgrade_database
+from sc2scala.server.database import alembic_config, create_database_engine, upgrade_database
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import LimitRefusedError, limits_changed
 from sc2scala.server.models import User
@@ -69,11 +72,20 @@ def test_limits_are_changed_by_name_and_kept_whole_where_whole() -> None:
     game, resource = limits_changed(
         {"max_game_steps": "40320", "bot_cpus": 1.5}, game_limits={}, resource_limits={"bot_memory_mib": 2048}
     )
-    assert (game["max_game_steps"], game["max_step_time_ms"]) == (40320, 40)
+    assert (game["max_game_steps"], game["max_step_time_ms"]) == (40320, None)
     assert (resource["bot_cpus"], resource["bot_memory_mib"], resource["game_cpus"]) == (1.5, 2048, 4.0)
-    for refused in [{"cores": 1}, {"bot_cpus": 0}, {"bot_processes": 10.5}, {"bot_log_mib": "lots"}]:
+    refusals = [{"cores": 1}, {"bot_cpus": 0}, {"bot_processes": 10.5}, {"bot_log_mib": "lots"}, {"bot_cpus": "off"}]
+    for refused in [*refusals, {"max_step_time_ms": "0"}, {"step_time_strikes": ""}]:
         with pytest.raises(LimitRefusedError):
             limits_changed(refused, game_limits={}, resource_limits={})
+
+
+def test_the_step_time_limit_is_off_unless_set_and_turned_off_by_none_or_its_words() -> None:
+    game, _ = limits_changed({"max_step_time_ms": "60"}, game_limits={}, resource_limits={})
+    assert game["max_step_time_ms"] == 60
+    for none in (None, "", "off", " None "):
+        game, _ = limits_changed({"max_step_time_ms": none}, game_limits={"max_step_time_ms": 60}, resource_limits={})
+        assert game["max_step_time_ms"] is None
 
 
 def test_a_zip_whose_sizes_lie_is_refused(tmp_path: Path) -> None:
@@ -101,4 +113,30 @@ def test_a_request_that_loses_a_race_for_a_name_is_a_conflict(tmp_path: Path) ->
         with pytest.raises(HTTPException) as conflict:
             commit_or_conflict(session, "taken at the same moment")
     assert (conflict.value.status_code, conflict.value.detail) == (409, "taken at the same moment")
+    engine.dispose()
+
+
+def test_the_migration_takes_the_old_default_step_time_limit_out_but_keeps_one_set(tmp_path: Path) -> None:
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'scala.db'}")
+    config = alembic_config(engine)
+    command.upgrade(config, "8a87638e067c")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO users (id, login, created_at) VALUES (1, 'alice', '2026-10-24')"))
+        for ladder_id, step_time_ms in ((1, 40), (2, 60)):
+            limits = f'{{"max_game_steps": 80640, "max_step_time_ms": {step_time_ms}, "step_time_strikes": 10}}'
+            connection.execute(
+                text(
+                    "INSERT INTO ladders (id, name, owner_id, game_limits, resource_limits, created_at)"
+                    f" VALUES ({ladder_id}, 'league{ladder_id}', 1, '{limits}', '{{}}', '2026-10-24')"
+                )
+            )
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT game_limits FROM ladders ORDER BY id")).scalars().all()
+        assert [json.loads(row)["max_step_time_ms"] for row in rows] == [None, 60]
+        assert json.loads(rows[0])["step_time_strikes"] == 10
+    command.downgrade(config, "8a87638e067c")
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT game_limits FROM ladders ORDER BY id")).scalars().all()
+        assert [json.loads(row)["max_step_time_ms"] for row in rows] == [40, 60]
     engine.dispose()

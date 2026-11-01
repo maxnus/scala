@@ -48,7 +48,9 @@ def limit_changes_from_form(
     match_controller_cpus: Annotated[str, Form()] = "",
     match_controller_memory_mib: Annotated[str, Form()] = "",
 ) -> dict[str, str]:
-    """The limits a form filled in, each by its name in `LIMIT_GROUPS`; one left empty is not changed."""
+    """The limits a form filled in, each by its name in `LIMIT_GROUPS`; one left empty is not changed, but one that
+    may be off is turned off, since the forms that post limits show them all, and FastAPI reads an empty field as one
+    left out."""
     given = {
         "max_game_steps": max_game_steps,
         "max_step_time_ms": max_step_time_ms,
@@ -63,10 +65,11 @@ def limit_changes_from_form(
         "match_controller_cpus": match_controller_cpus,
         "match_controller_memory_mib": match_controller_memory_mib,
     }
-    return {name: value.strip() for name, value in given.items() if value.strip()}
+    return {name: value.strip() for name, value in given.items() if value.strip() or name in _OPTIONAL_LIMITS}
 
 
 LimitChanges = Annotated[dict[str, str], Depends(limit_changes_from_form)]
+_OPTIONAL_LIMITS = {field.name for _, group in LIMIT_GROUPS for field in group if field.optional}
 
 
 @router.get(_NEW_LADDER_PAGE, response_class=HTMLResponse)

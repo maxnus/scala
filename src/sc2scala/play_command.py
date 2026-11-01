@@ -6,8 +6,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from sc2scala.aiarena_engine import AiArenaEngine
 from sc2scala.bot import Bot
+from sc2scala.engine_choice import DEFAULT_ENGINE, ENGINE_NAMES, engine_named
 from sc2scala.errors import EngineError
 from sc2scala.match import Match
 from sc2scala.match_engine import MatchEngine
@@ -38,6 +38,12 @@ def add_play_command(add_parser: Callable[..., argparse.ArgumentParser]) -> None
         help="each bot's race: T, Z, P or R, or its name (default: R R)",
     )
     play.add_argument(
+        "--engine",
+        choices=ENGINE_NAMES,
+        default=DEFAULT_ENGINE,
+        help=f"the engine that plays it: AI Arena's, or Scala's own, being tried (default: {DEFAULT_ENGINE})",
+    )
+    play.add_argument(
         "--output",
         type=Path,
         help=f"the folder to write into, which must be empty (default: {_DEFAULT_OUTPUT_ROOT}/<time>-<bot>-vs-<bot>)",
@@ -45,7 +51,7 @@ def add_play_command(add_parser: Callable[..., argparse.ArgumentParser]) -> None
 
 
 def run_play(args: argparse.Namespace, parser: argparse.ArgumentParser, *, engine: MatchEngine | None) -> int:
-    """Plays the match `args` names with `engine`, by default an `AiArenaEngine`, and returns the exit code."""
+    """Plays the match `args` names with `engine`, by default the one `--engine` names, and returns the exit code."""
     try:
         match = _match_from_arguments(args)
         _check_is_empty_or_missing(args.output)
@@ -53,7 +59,7 @@ def run_play(args: argparse.Namespace, parser: argparse.ArgumentParser, *, engin
         parser.error(str(error))
     output_folder = args.output or _new_default_output_folder(match)
     try:
-        result = (engine or AiArenaEngine()).play(match, output_folder=output_folder)
+        result = (engine or engine_named(args.engine)).play(match, output_folder=output_folder)
     except EngineError as error:
         logger.error(str(error))
         return 1

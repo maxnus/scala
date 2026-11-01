@@ -1,8 +1,10 @@
 """A bot that tries, before it joins the game, to do what the sandbox forbids, prints what came of it, and leaves.
 
-The line it prints begins with `SANDBOX_PROBE ` and holds a JSON object, each attempt mapped to what came of it.
+The line it prints begins with `SANDBOX_PROBE ` and holds a JSON object, each attempt mapped to what came of it. It
+tries the names of both engines' containers, and reaches the match controller where its command line says.
 """
 
+import argparse
 import json
 import os
 import socket
@@ -13,6 +15,8 @@ from pathlib import Path
 from sc2.bot_ai import BotAI
 from sc2.data import Race
 from sc2.player import Bot
+from websockets.exceptions import ConnectionClosed
+from websockets.sync.client import connect
 
 _PROCESSES_TO_START = 1100
 
@@ -27,6 +31,19 @@ def _outcome_of(attempt: Callable[[], object]) -> str:
 
 def _connect(host: str, port: int) -> None:
     socket.create_connection((host, port), timeout=3).close()
+
+
+def _other_seat(host: str, port: int) -> str:
+    """What came of taking the other seat by its port, which Scala's engine gives the seat after this one's."""
+    other_port = port + 1 if port % 2 else port - 1
+    try:
+        with connect(f"ws://{host}:{other_port}/sc2api", open_timeout=3) as connection:
+            connection.recv(timeout=3)
+    except ConnectionClosed as closed:
+        return f"closed {closed.rcvd.code if closed.rcvd else 'without a code'}"
+    except Exception as error:
+        return f"failed: {type(error).__name__}"
+    return "taken"
 
 
 def _status_field(name: str) -> str:
@@ -51,6 +68,11 @@ def _processes_started(count: int) -> int:
 
 
 def probe_the_sandbox() -> dict[str, object]:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--GamePort", type=int)
+    parser.add_argument("--LadderServer")
+    arguments, _ = parser.parse_known_args()
+    controller, port = arguments.LadderServer, arguments.GamePort
     bot_folder = Path(__file__).resolve().parent
     return {
         "user": os.getuid(),
@@ -59,10 +81,12 @@ def probe_the_sandbox() -> dict[str, object]:
         "bots visible": sorted(os.listdir("/bots")),
         "resolve github.com": _outcome_of(lambda: socket.getaddrinfo("github.com", 443)),
         "connect 1.1.1.1:443": _outcome_of(lambda: _connect("1.1.1.1", 443)),
-        "resolve sc2_controller": _outcome_of(lambda: socket.getaddrinfo("sc2_controller", 8083)),
-        "resolve bot_controller2": _outcome_of(lambda: socket.getaddrinfo("bot_controller2", 8082)),
-        "resolve bot_controller1": _outcome_of(lambda: socket.getaddrinfo("bot_controller1", 8081)),
-        "connect proxy_controller:8080": _outcome_of(lambda: _connect("proxy_controller", 8080)),
+        **{
+            f"resolve {name}": _outcome_of(lambda name=name: socket.getaddrinfo(name, 8080))
+            for name in ("sc2_controller", "bot_controller1", "bot_controller2", "game", "bot_1", "bot_2")
+        },
+        "connect the match controller": _outcome_of(lambda: _connect(controller, port)),
+        "take the other seat": _other_seat(controller, port),
         "write /": _outcome_of(lambda: Path("/probe").write_text("probe")),
         "write its own folder": _outcome_of(lambda: (bot_folder / "probe").write_text("probe")),
         "write its data folder": _outcome_of(lambda: (bot_folder / "data" / "probe").write_text("probe")),

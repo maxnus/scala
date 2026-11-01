@@ -254,13 +254,12 @@ def test_a_bot_whose_logs_grow_past_their_limit_is_stopped_and_loses(tmp_path: P
     assert (result.logs_folder / "player_1-basic_bot" / "flood.log").stat().st_size < 2 * _MEBIBYTE
 
 
-def test_a_bot_can_play_itself(tmp_path: Path, match: Match) -> None:
+def test_a_bot_playing_itself_is_refused(tmp_path: Path, match: Match) -> None:
     mirror = Match(player_1=match.player_1, player_2=match.player_1, map_file=match.map_file)
-    engine_with(FakeDocker(engine_result=_RESULT_OF_A_WIN), keep_work_folder=True).play(
-        mirror, output_folder=tmp_path / "out"
-    )
-    for seat in ("1", "2"):
-        assert (tmp_path / "out" / ".work" / "bots" / seat / "basic_bot" / "run.py").is_file()
+    docker = FakeDocker(engine_result=_RESULT_OF_A_WIN)
+    with pytest.raises(EngineError, match="against itself"):
+        engine_with(docker).play(mirror, output_folder=tmp_path / "out")
+    assert docker.commands == []
 
 
 def test_the_containers_are_created_played_and_removed(tmp_path: Path, match: Match) -> None:

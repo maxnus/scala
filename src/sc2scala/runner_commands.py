@@ -15,8 +15,8 @@ from types import FrameType
 import httpx
 from loguru import logger
 
-from sc2scala.aiarena_engine import AiArenaEngine
 from sc2scala.client_credentials import ClientCredentials, default_credentials_file
+from sc2scala.engine_choice import engine_named, images_of_every_engine
 from sc2scala.errors import ScalaError, ServerError
 from sc2scala.match_engine import MatchEngine
 from sc2scala.runner import Runner
@@ -238,9 +238,9 @@ def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: Match
     work_folder = _data_home() / "work"
     with RunnerLock(_data_home() / _LOCK_FILE_NAME):
         if engine is None:
-            aiarena_engine = AiArenaEngine()
-            aiarena_engine.pull_images(log_file=work_folder / "pull.log")
-            engine = aiarena_engine
+            configured_engine = engine_named(config.engine)
+            configured_engine.pull_images(log_file=work_folder / "pull.log")
+            engine = configured_engine
         runner = Runner(
             client, engine, cache_folder=_cache_home(), work_folder=work_folder, cache_bytes=config.cache_bytes
         )
@@ -309,9 +309,9 @@ def _stop(*, now: bool) -> int:
 
 
 def _pull_images() -> None:
-    """Pulls each of the engine's images that Docker lacks, showing Docker's progress; raises `ScalaError` if Docker
+    """Pulls each image of either engine that Docker lacks, showing Docker's progress; raises `ScalaError` if Docker
     cannot."""
-    for image in AiArenaEngine().images:
+    for image in images_of_every_engine():
         try:
             if subprocess.run(["docker", "image", "inspect", image], capture_output=True, check=False).returncode == 0:
                 print(f"{image}: here already")

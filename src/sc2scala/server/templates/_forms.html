@@ -39,9 +39,10 @@
     <fieldset class="limits">
       <legend>{{ group_name }}</legend>
       {% for field in group %}
+        {% set value = kept.get(field.name, limits[field.name]) %}
         <label>
           <span>{{ field.label }}</span>
-          <input type="number" name="{{ field.name }}" value="{{ kept.get(field.name, limits[field.name]) }}" required
+          <input type="number" name="{{ field.name }}" value="{{ '' if value is none else value }}"{% if field.optional %} placeholder="none"{% else %} required{% endif %}
                  min="{{ '0.01' if field.fractional else 1 }}" step="{{ 'any' if field.fractional else 1 }}" inputmode="{{ 'decimal' if field.fractional else 'numeric' }}">
         </label>
       {% endfor %}

@@ -1,21 +1,27 @@
 import json
-import os
 import shutil
-import subprocess
-import threading
-import time
-import uuid
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from sc2scala.bot import Bot
-from sc2scala.bot_type import BotType
 from sc2scala.command_runner import CommandRunner, run_command
-from sc2scala.errors import EngineError, MatchStoppedError, MatchTimeoutError
+from sc2scala.compose_matches import (
+    COMPOSE_FILE_NAME,
+    UNPRIVILEGED_OPTIONS,
+    WORK_FOLDER_NAME,
+    ComposeMatches,
+    container_user,
+    copy_bot,
+    docker_is_rootless,
+    move_replay,
+    prepare_output_folder,
+    refuse_windows_bots,
+    remove_work_folder,
+)
+from sc2scala.errors import EngineError
 from sc2scala.game_limits import GameLimits
-from sc2scala.log_watchdog import LogWatchdog
 from sc2scala.match import Match
 from sc2scala.match_result import MatchResult
 from sc2scala.result_code import ResultCode
@@ -23,15 +29,9 @@ from sc2scala.result_code import ResultCode
 AIARENA_IMAGE_TAG = "v0.8.0"
 """The tag of AI Arena's images, as its local setup pins them."""
 
-_REAL_TIME_MARGIN_SECONDS = 300
-_CONTAINER_STOP_SECONDS = 10
-_WORK_FOLDER_NAME = ".work"
-_COMPOSE_FILE_NAME = "docker-compose.json"
-_PROJECT_FILE_NAME = "compose-project"
-"""The file in the work folder that names the match's Compose project while its containers may exist."""
 _MATCH_CONTROLLER_SERVICE = "proxy_controller"
+_BOT_SERVICES = ("bot_controller1", "bot_controller2")
 _GAME_FOLDER = "/root/StarCraftII"
-_MEBIBYTE = 1024 * 1024
 _NETWORKS = ("player_1", "player_2", "game")
 """The match's networks: each bot's, which it shares with the match controller alone, and the game's."""
 
@@ -63,11 +63,7 @@ class AiArenaEngine:
         self.image_tag = image_tag
         self.keep_work_folder = keep_work_folder
         self.rootless = rootless
-        self._run_command = run_command
-        self._lock = threading.Lock()
-        self._stopped = False
-        self._playing: dict[tuple[str, ...], Path] = {}
-        """The Compose command of each match being played, with its log."""
+        self._compose = ComposeMatches(run_command)
 
     @property
     def images(self) -> list[str]:
@@ -76,71 +72,55 @@ class AiArenaEngine:
 
     def pull_images(self, *, log_file: Path) -> None:
         """Downloads the engine's images that Docker lacks, about 11 GB at first; raises `EngineError` if it cannot."""
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        for image in self.images:
-            if self._run_command(["docker", "image", "inspect", image], timeout=None, log_file=log_file) == 0:
-                continue
-            if self._run_command(["docker", "pull", "--quiet", image], timeout=None, log_file=log_file) != 0:
-                raise EngineError(f"Docker could not pull {image}; see {log_file}")
+        self._compose.pull_images(self.images, log_file=log_file)
 
     def stop_matches(self) -> None:
         """Kills the containers of the matches being played, which then raise `MatchStoppedError`, and refuses to play
         any later."""
-        with self._lock:
-            self._stopped = True
-            playing = list(self._playing.items())
-        for compose, compose_log in playing:
-            try:
-                self._run_command([*compose, "kill"], timeout=_CONTAINER_STOP_SECONDS * 6, log_file=compose_log)
-            except (EngineError, subprocess.TimeoutExpired) as error:
-                logger.warning(f"Docker Compose could not kill a match's containers: {error}")
+        self._compose.stop_matches()
 
     def remove_leftovers(self, output_folder: Path) -> None:
         """Removes the containers of a match played into `output_folder`, if what played it was killed before it
         could, which the work folder then still names; raises `EngineError` if Docker Compose cannot."""
-        project_file = output_folder / _WORK_FOLDER_NAME / _PROJECT_FILE_NAME
-        if not project_file.is_file():
-            return
-        project_name = project_file.read_text(encoding="utf-8").strip()
-        logger.info(f"Removing the containers of {project_name}, which a match left in {output_folder}")
-        log_file = output_folder / "logs" / "compose.log"
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        down = ["docker", "compose", "--project-name", project_name, "down", "--remove-orphans"]
-        if self._run_command([*down, "--timeout", str(_CONTAINER_STOP_SECONDS)], timeout=None, log_file=log_file) != 0:
-            raise EngineError(f"Docker Compose could not remove the containers of {project_name}; see {log_file}")
-        project_file.unlink()
+        self._compose.remove_leftovers(output_folder)
 
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         """Plays `match` as `MatchEngine.play` says.
 
         Raises `MatchTimeoutError` if the match runs past its real-time limit and a margin, `MatchStoppedError` if
         `stop_matches` stopped it, and `EngineError` for a Windows bot, or if Docker is missing, a container does not
-        start, or the engine reports no result. A match that raises leaves its work folder, but for its copies of the
-        bots and the map.
+        start, or the engine reports no result, and for a bot playing itself, since the game would make both its seats
+        player 1 (in game, 4.10). A match that raises leaves its work folder, but for its copies of the bots and the
+        map.
         """
-        for bot in (match.player_1, match.player_2):
-            if bot.bot_type == BotType.CPP_WIN32:
-                raise EngineError(f"{bot.name} is a Windows bot, and the engine's images hold no Wine to run it")
-        _prepare_output_folder(output_folder)
+        refuse_windows_bots(match)
+        if match.player_1.name == match.player_2.name:
+            raise EngineError(
+                f"AI Arena's engine cannot play {match.player_1.name} against itself: the game makes two players who "
+                "join under one name one player; Scala's engine can"
+            )
+        prepare_output_folder(output_folder)
         logs_folder = output_folder / "logs"
         logs_folder.mkdir()
         compose_log = logs_folder / "compose.log"
-        work_folder = output_folder / _WORK_FOLDER_NAME
+        work_folder = output_folder / WORK_FOLDER_NAME
         if self.rootless is None:
-            self.rootless = _docker_is_rootless()
-        container_user = None if self.rootless or not hasattr(os, "getuid") else f"{os.getuid()}:{os.getgid()}"
-        compose_file = _lay_out_work_folder(
-            match, work_folder=work_folder, image_tag=self.image_tag, container_user=container_user
+            self.rootless = docker_is_rootless()
+        _lay_out_work_folder(
+            match, work_folder=work_folder, image_tag=self.image_tag, container_user=container_user(self.rootless)
         )
-        project_name = f"sc2scala-{uuid.uuid4().hex[:12]}"
-        compose = ["docker", "compose", "--project-name", project_name, "--file", str(compose_file)]
 
         logger.info(f"Playing {match.player_1.name} against {match.player_2.name} on {match.map_name}")
         try:
-            real_time_seconds, seat_over_log_limit = self._play_in_containers(
-                match, compose=compose, project_name=project_name, work_folder=work_folder, compose_log=compose_log
+            real_time_seconds, seat_over_log_limit = self._compose.play_in_containers(
+                match,
+                work_folder=work_folder,
+                compose_log=compose_log,
+                controller_service=_MATCH_CONTROLLER_SERVICE,
+                bot_services=_BOT_SERVICES,
+                bot_log_folders=(work_folder / "logs" / _BOT_SERVICES[0], work_folder / "logs" / _BOT_SERVICES[1]),
             )
-            replay_file = _move_replay(work_folder / "replays", output_folder)
+            replay_file = move_replay(work_folder / "replays", output_folder)
             _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
             try:
                 engine_result = _read_engine_result(work_folder / "results.json", compose_log=compose_log)
@@ -150,14 +130,10 @@ class AiArenaEngine:
                 engine_result = {}
         except Exception:
             if not self.keep_work_folder:
-                for copies in ("bots", "maps"):
-                    shutil.rmtree(work_folder / copies, ignore_errors=True)
+                remove_work_folder(work_folder, failed=True)
             raise
         if not self.keep_work_folder:
-            try:
-                shutil.rmtree(work_folder)
-            except OSError as error:
-                logger.warning(f"Could not remove {work_folder}: {error}")
+            remove_work_folder(work_folder, failed=False)
         if seat_over_log_limit is None:
             code = ResultCode(engine_result["type"])
         else:
@@ -172,98 +148,12 @@ class AiArenaEngine:
             logs_folder=logs_folder,
         )
 
-    def _play_in_containers(
-        self, match: Match, *, compose: list[str], project_name: str, work_folder: Path, compose_log: Path
-    ) -> tuple[float, int | None]:
-        """Creates the match's containers, starts them, waits for the match controller to end, and removes them,
-        whatever happens.
-
-        A container that stops, a bot's killed for its logs among them, leaves the others playing. Returns the real time
-        the match took, and the seat of the bot whose logs grew past their limit, or `None`. After each step, raises
-        `MatchStoppedError` if `stop_matches` was called meanwhile. The work folder names the project while its
-        containers may exist, for `remove_leftovers`.
-        """
-        started = time.monotonic()
-        created = False
-        project_file = work_folder / _PROJECT_FILE_NAME
-        with self._lock:
-            if self._stopped:
-                raise MatchStoppedError("The match was stopped before it began")
-            self._playing[tuple(compose)] = compose_log
-        project_file.write_text(project_name + "\n", encoding="utf-8")
-        removed = False
-        try:
-            create = [*compose, "create", "--pull", "missing"]
-            create_exit_code = self._run_command(create, timeout=None, log_file=compose_log)
-            created = True
-            if create_exit_code != 0:
-                raise EngineError(f"Docker Compose could not create the match's containers; see {compose_log}")
-            self._raise_if_stopped()
-            started = time.monotonic()
-            if self._run_command([*compose, "up", "--detach"], timeout=None, log_file=compose_log) != 0:
-                raise EngineError(f"Docker Compose could not start the match's containers; see {compose_log}")
-            self._raise_if_stopped()
-            timeout = match.limits.max_real_time_seconds + _REAL_TIME_MARGIN_SECONDS
-            watchdog = LogWatchdog(
-                [work_folder / "logs" / f"bot_controller{seat}" for seat in (1, 2)],
-                max_bytes=match.resource_limits.bot_log_mib * _MEBIBYTE,
-                stop_bot=lambda seat: self._run_command(
-                    [*compose, "kill", f"bot_controller{seat}"], timeout=None, log_file=compose_log
-                ),
-            )
-            try:
-                with watchdog:
-                    wait = [*compose, "wait", _MATCH_CONTROLLER_SERVICE]
-                    self._run_command(wait, timeout=timeout, log_file=compose_log)
-            except subprocess.TimeoutExpired as error:
-                raise MatchTimeoutError(f"The match ran past {timeout} seconds and was stopped") from error
-            self._raise_if_stopped()
-            return time.monotonic() - started, watchdog.exceeded_seat
-        finally:
-            if created:
-                logs = [*compose, "logs", "--no-color", "--timestamps"]
-                try:
-                    self._run_command(logs, timeout=_CONTAINER_STOP_SECONDS * 6, log_file=compose_log)
-                except subprocess.TimeoutExpired:
-                    logger.warning(f"Docker Compose took too long to write the containers' output to {compose_log}")
-                down = [*compose, "down", "--remove-orphans", "--timeout", str(_CONTAINER_STOP_SECONDS)]
-                removed = self._run_command(down, timeout=None, log_file=compose_log) == 0
-            if removed or not created:
-                project_file.unlink()
-            with self._lock:
-                self._playing.pop(tuple(compose), None)
-
-    def _raise_if_stopped(self) -> None:
-        with self._lock:
-            if self._stopped:
-                raise MatchStoppedError("The match was stopped while it was played")
-
-
-def _prepare_output_folder(output_folder: Path) -> None:
-    if output_folder.exists() and any(output_folder.iterdir()):
-        raise ValueError(f"{output_folder} is not empty")
-    output_folder.mkdir(parents=True, exist_ok=True)
-
-
-def _docker_is_rootless() -> bool:
-    """Whether Docker runs rootless, its daemon and its containers' root as the user who started it."""
-    try:
-        security_options = subprocess.run(
-            ["docker", "info", "--format", "{{json .SecurityOptions}}"], capture_output=True, text=True, check=True
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise EngineError("Docker is not installed, or not running, or this user may not use it") from error
-    return "name=rootless" in security_options
-
 
 def _lay_out_work_folder(match: Match, *, work_folder: Path, image_tag: str, container_user: str | None) -> Path:
     """Writes what the engine reads into `work_folder`, and returns the Compose file."""
     work_folder.mkdir()
     for seat, bot in enumerate((match.player_1, match.player_2), start=1):
-        bot_folder = work_folder / "bots" / str(seat) / bot.name
-        shutil.copytree(bot.folder, bot_folder, symlinks=True)
-        (bot_folder / "data").mkdir(exist_ok=True)
-        _make_entry_point_executable(bot, bot_folder)
+        copy_bot(bot, work_folder / "bots" / str(seat) / bot.name)
         (work_folder / "logs" / f"bot_controller{seat}").mkdir(parents=True)
     (work_folder / "maps").mkdir()
     shutil.copyfile(match.map_file, work_folder / "maps" / match.map_file.name)
@@ -271,22 +161,12 @@ def _lay_out_work_folder(match: Match, *, work_folder: Path, image_tag: str, con
     (work_folder / "matches").write_text(_matches_line(match) + "\n", encoding="utf-8")
     (work_folder / "results.json").write_text('{"results": []}\n', encoding="utf-8")
     (work_folder / "config.toml").write_text(_engine_config(match.limits), encoding="utf-8")
-    compose_file = work_folder / _COMPOSE_FILE_NAME
+    compose_file = work_folder / COMPOSE_FILE_NAME
     compose_project = _compose_project(
         match, work_folder=work_folder.resolve(), image_tag=image_tag, user=container_user
     )
     compose_file.write_text(json.dumps(compose_project, indent=2), encoding="utf-8")
     return compose_file
-
-
-def _make_entry_point_executable(bot: Bot, bot_folder: Path) -> None:
-    """Lets the binary of a Linux bot run, which its controller cannot see to on a folder it may only read.
-
-    A binary that is a symbolic link is left as it is, since its target may lie outside the work folder.
-    """
-    binary = bot_folder / bot.name
-    if bot.bot_type in (BotType.CPP_LINUX, BotType.LINUX) and not binary.is_symlink():
-        binary.chmod(binary.stat().st_mode | 0o111)
 
 
 def _matches_line(match: Match) -> str:
@@ -299,7 +179,8 @@ def _matches_line(match: Match) -> str:
 
 
 def _engine_config(limits: GameLimits) -> str:
-    """The match controller's `config.toml`, as AI Arena's local setup writes it, with `limits`."""
+    """The match controller's `config.toml`, as AI Arena's local setup writes it, with `limits`; it reads
+    `MAX_FRAME_TIME` and `STRIKES` and applies neither, and 0 stands for no step-time limit."""
     return f"""\
 ARENA_CLIENT_ID = "sc2scala"
 ROUNDS_PER_RUN = -1
@@ -317,7 +198,7 @@ BOTS_DIRECTORY = "/bots"
 
 MAX_GAME_TIME = {limits.max_game_steps}
 MAX_REAL_TIME = {limits.max_real_time_seconds}
-MAX_FRAME_TIME = {limits.max_step_time_ms}
+MAX_FRAME_TIME = {limits.max_step_time_ms or 0}
 STRIKES = {limits.step_time_strikes}
 REALTIME = false
 VISUALIZE = false
@@ -346,7 +227,7 @@ def _compose_project(match: Match, *, work_folder: Path, image_tag: str, user: s
     reaches beyond the match.
     """
     resource_limits = match.resource_limits
-    unprivileged: dict[str, Any] = {"cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"]}
+    unprivileged: dict[str, Any] = dict(UNPRIVILEGED_OPTIONS)
     if user is not None:
         unprivileged["user"] = user
 
@@ -435,14 +316,6 @@ def _read_engine_result(results_file: Path, *, compose_log: Path) -> dict[str, A
     if engine_result.get("type") not in set(ResultCode):
         raise EngineError(f"The engine reported a result of unknown type: {engine_result}")
     return engine_result
-
-
-def _move_replay(replays_folder: Path, output_folder: Path) -> Path | None:
-    replays = sorted(replays_folder.glob("*.SC2Replay"))
-    if not replays:
-        logger.warning("The engine saved no replay")
-        return None
-    return Path(shutil.move(replays[0], output_folder / replays[0].name))
 
 
 def _move_logs(match: Match, *, work_folder: Path, logs_folder: Path) -> None:

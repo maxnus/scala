@@ -1,6 +1,7 @@
 """Plays one match, as `sc2scala play` does, and measures the memory and CPU each of its containers took.
 
-    uv run python tools/measure_match.py BOT_FOLDER BOT_FOLDER --map MAP [--races RACE RACE] [--output FOLDER]
+    uv run python tools/measure_match.py BOT_FOLDER BOT_FOLDER --map MAP [--races RACE RACE] [--engine ENGINE]
+        [--output FOLDER]
 
 It lists the containers of Compose projects named `sc2scala-*` once a second, so play no other match on the machine
 meanwhile, and reads their cgroups four times a second. It needs cgroup v2, as Ubuntu has it. Memory is what the cgroup
@@ -16,7 +17,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sc2scala import AiArenaEngine, Bot, Match, MatchResult, Race
+from sc2scala import Bot, Match, MatchResult, Race
+from sc2scala.engine_choice import DEFAULT_ENGINE, ENGINE_NAMES, engine_named
 
 _CGROUP_ROOT = Path("/sys/fs/cgroup")
 _PROJECT_PREFIX = "sc2scala-"
@@ -155,6 +157,7 @@ def main() -> None:
         metavar="RACE",
         help="T, Z, P or R, or its name (default: R R)",
     )
+    parser.add_argument("--engine", choices=ENGINE_NAMES, default=DEFAULT_ENGINE)
     parser.add_argument("--output", type=Path, default=Path("matches") / f"measured-{time.strftime('%Y%m%d-%H%M%S')}")
     args = parser.parse_args()
 
@@ -167,7 +170,7 @@ def main() -> None:
     outcome: dict[str, MatchResult] = {}
 
     def play() -> None:
-        outcome["result"] = AiArenaEngine().play(match, output_folder=args.output)
+        outcome["result"] = engine_named(args.engine).play(match, output_folder=args.output)
 
     player = threading.Thread(target=play)
     player.start()

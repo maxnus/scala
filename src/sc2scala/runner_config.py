@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from sc2scala.client_credentials import default_credentials_file
+from sc2scala.engine_choice import DEFAULT_ENGINE, ENGINE_NAMES
 from sc2scala.errors import ScalaError
 
 _CONFIG_FILE_NAME = "runner.toml"
@@ -80,11 +81,13 @@ ANY_HOUR = PlayingSchedule()
 
 @dataclass(frozen=True)
 class RunnerConfig:
-    """How many matches a machine plays at once, how many GiB of bots and maps it keeps, and when it plays."""
+    """How many matches a machine plays at once, how many GiB of bots and maps it keeps, when it plays, and with which
+    engine, one of `ENGINE_NAMES`."""
 
     runners: int = 1
     cache_gib: float = DEFAULT_CACHE_GIB
     schedule: PlayingSchedule = ANY_HOUR
+    engine: str = DEFAULT_ENGINE
 
     @property
     def cache_bytes(self) -> int:
@@ -111,7 +114,7 @@ class RunnerConfig:
 
     @classmethod
     def _from_toml(cls, content: dict[str, Any]) -> "RunnerConfig":
-        _refuse_unknown(content, {"runners", "cache_gib", "window"}, "setting")
+        _refuse_unknown(content, {"runners", "cache_gib", "window", "engine"}, "setting")
         runners = content.get("runners", 1)
         if not isinstance(runners, int) or isinstance(runners, bool) or runners < 1:
             raise RunnerConfigError(f"runners is a whole number of 1 or more, not {runners!r}")
@@ -126,10 +129,14 @@ class RunnerConfig:
         windows = content.get("window", [])
         if not isinstance(windows, list):
             raise RunnerConfigError("each window is a table of its own, `[[window]]`")
+        engine = content.get("engine", DEFAULT_ENGINE)
+        if engine not in ENGINE_NAMES:
+            raise RunnerConfigError(f"engine is one of {', '.join(map(repr, ENGINE_NAMES))}, not {engine!r}")
         return cls(
             runners=runners,
             cache_gib=cache_gib,
             schedule=PlayingSchedule(tuple(_window_from(window) for window in windows)),
+            engine=engine,
         )
 
 
@@ -158,6 +165,9 @@ runners = 1
 
 # How many GiB of bots and maps it keeps; past that, those least recently used go first.
 cache_gib = {DEFAULT_CACHE_GIB}
+
+# Which engine plays its matches: "aiarena", AI Arena's, by default, or "scala", Scala's own, which is being tried.
+# engine = "scala"
 
 # When it takes matches, in its local time; with no window, at any hour. A window that crosses midnight belongs to
 # the days it starts on, and a match being played when a window closes is played to its end. `days` is a list of

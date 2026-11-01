@@ -110,7 +110,12 @@ def test_runner_pull_pulls_the_images_docker_lacks(
 
     monkeypatch.setattr("sc2scala.runner_commands.subprocess.run", docker)
     assert main(["runner", "pull"]) == 0
-    assert [command[1] for command in commands] == ["image", "image", "pull", "image", "pull"]
+    assert [command[1] for command in commands] == ["image", "image", "pull", "image", "pull", "image", "pull"]
+    assert [command[2] for command in commands if command[1] == "pull"] == [
+        "aiarena/arenaclient-bot:v0.8.0",
+        "aiarena/arenaclient-proxy:v0.8.0",
+        "aiarena/arenaclient-bot-base:v0.8.0",
+    ]
     assert capsys.readouterr().out == "aiarena/arenaclient-sc2:v0.8.0: here already\n"
 
 

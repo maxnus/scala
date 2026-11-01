@@ -19,6 +19,10 @@ classifiers = [
 dependencies = [
     "httpx>=0.28",
     "loguru>=0.7",
+    # The match controller's, which Scala's engine copies into each match.
+    "protobuf>=6.31.1",
+    "pys2clientprotocol>=1.0.2",
+    "websockets>=14.0",
 ]
 
 [project.urls]

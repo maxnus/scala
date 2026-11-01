@@ -54,8 +54,17 @@ def test_a_match_is_drawn_from_the_ladders_two_bots_and_its_maps(ladder: LadderW
     assert races == {"basic_bot": "T", "bobs_bot": "Z"}
     assert match["map"]["name"] in ("PylonAIE_v4", "TorchesAIE_v4")
     assert match["game_limits"]["max_real_time_seconds"] == 600
+    assert "max_step_time_ms" not in match["game_limits"]
     deadline = datetime.fromisoformat(match["deadline"])
     assert timedelta(seconds=1499) < deadline - before < timedelta(seconds=1510)
+
+
+def test_a_step_time_limit_is_offered_only_where_the_ladder_sets_one(ladder: LadderWithBots) -> None:
+    limits = {"max_step_time_ms": 40, "step_time_strikes": 3}
+    assert ladder.server.patch("/api/ladders/league", headers=ladder.alice, json={"limits": limits}).status_code == 200
+    match = draw(ladder.server, ladder.runner)
+    assert match is not None
+    assert (match["game_limits"]["max_step_time_ms"], match["game_limits"]["step_time_strikes"]) == (40, 3)
 
 
 def test_both_seats_and_every_map_come_up(ladder: LadderWithBots) -> None:

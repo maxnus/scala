@@ -12,6 +12,7 @@ from sc2scala.match_result import MatchResult
 from sc2scala.race import Race
 from sc2scala.resource_limits import ResourceLimits
 from sc2scala.result_code import ResultCode
+from sc2scala.scala_engine import SCALA_BOT_IMAGE, SCALA_GAME_IMAGE, ScalaEngine
 
 __all__ = [
     "AIARENA_IMAGE_TAG",
@@ -28,6 +29,9 @@ __all__ = [
     "Race",
     "ResourceLimits",
     "ResultCode",
+    "SCALA_BOT_IMAGE",
+    "SCALA_GAME_IMAGE",
+    "ScalaEngine",
     "ScalaError",
     "__version__",
 ]

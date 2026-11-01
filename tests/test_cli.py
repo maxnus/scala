@@ -108,3 +108,18 @@ def test_runs_started_in_the_same_second_write_to_folders_of_their_own(
         "20261024-120000-basic_bot-vs-loser_bot",
         "20261024-120000-basic_bot-vs-loser_bot-2",
     ]
+
+
+@pytest.mark.parametrize(("arguments", "engine_name"), [([], "aiarena"), (["--engine", "scala"], "scala")])
+def test_play_takes_ai_arena_s_engine_unless_scala_s_is_named(
+    tmp_path: Path, play_arguments: list[str], monkeypatch: pytest.MonkeyPatch, arguments: list[str], engine_name: str
+) -> None:
+    named: list[str] = []
+
+    def engine_named(name: str) -> RecordingEngine:
+        named.append(name)
+        return RecordingEngine()
+
+    monkeypatch.setattr("sc2scala.play_command.engine_named", engine_named)
+    assert main([*play_arguments, *arguments, "--output", str(tmp_path / "out")]) == 0
+    assert named == [engine_name]

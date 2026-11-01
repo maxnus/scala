@@ -193,7 +193,8 @@ it and starts the service. From then on its owner controls it in the pages, on t
 `sc2scala runner set`, as decision 13 says, and needs root on the machine only to update or remove it:
 
 - **the ladders it serves**, as since step 6b;
-- **how many matches it plays at once**, 1 at first, up to the most the machine allows;
+- **how many matches it plays at once**, up to the most the machine allows; 1 at first, since the machine may do other
+  work that its cores and memory do not show, and its owner raises it once they have seen a match played;
 - **pausing and resuming it**: paused, it takes no new match, and lets those it plays end;
 - **when it plays**: weekly windows in its own time zone, one a line, as `mon-fri 23:00-07:00` or `sat-sun`. A window
   that crosses midnight belongs to the days it starts on, and with none, a machine plays at any hour.
@@ -201,18 +202,23 @@ it and starts the service. From then on its owner controls it in the pages, on t
 The server holds all four, and applies them when the runner asks for a match: it leases a machine no more matches at a
 time than its number, and none while it is paused or outside its windows. A change in the pages thus reaches the runner
 at its next ask, within the 30 s an idle runner waits between asks, with no restart; lowering the number, pausing, or a
-window closing lets the matches being played end, which the real-time limit bounds. The runner keeps as many workers
-as the machine allows, and while the server refuses it a match for its number, its pause or its windows, one of them
-asks for all. Each ask says:
+window closing lets the matches being played end, which the real-time limit bounds. Every answer, a match or none,
+carries the machine's number and whether it may play now, paused or outside its windows. The runner keeps as many
+workers as the machine allows, lets ask only as many as the number leaves free, and wakes the others when an answer
+frees more; with none free, one asks every 30 s for nothing but the answer, and a runner playing as many as it may
+still asks each minute, so that its page shows it seen. Each ask says:
 
 - **the matches the runner plays**, so that the server voids a lease the runner no longer plays, as when it was killed
-  in a match, rather than count it against the machine's number until its deadline; the runner asks one at a time, so
-  that an ask names every match it plays;
-- **the machine's local time**, in which the server reads its windows;
+  in a match, rather than count it against the machine's number until its deadline. The runner asks one at a time, so
+  that an ask names every match it plays, and the server voids only a lease drawn before the runner's previous ask was
+  answered, so that a lease whose answer is still on its way is never voided;
+- **the machine's local time**, in which the server reads its windows, keeping the latest for the page; a machine that
+  never asked shows its windows without a next opening;
 - **the most it allows, its Scala and its engine**, which the page shows.
 
 What is the machine's alone stays in a file beside its token: the most matches it may play at once, one per 4 cores and
-8 GiB unless the file says otherwise, how much disk its cache may take, and its engine until 8c removes the choice:
+8 GiB unless the file says otherwise, which a machine shared with other work lowers, how much disk its cache may take,
+and its engine until 8c removes the choice:
 
 ```toml
 # ~/.config/sc2scala/runner.toml
@@ -221,10 +227,11 @@ cache_gib = 20
 ```
 
 The account page shows, for each machine, the matches it plays now, each linked to its page, or why it plays none:
-paused, outside its windows until the next opens, no match to play, or not seen for a while; and the most it allows,
-its Scala and its engine, as of its last ask. A runner of a release before step 9 names no matches when it asks; the
-server leaves it as it was, playing as many at once as its file's `runners` says, in its file's windows, until it is
-updated. An updated runner reads its file's `runners` and windows no more, and says so as it starts. Only the owner's
+paused, outside its windows until the next opens, no match to play, or not seen for 5 minutes, five of the asks it
+makes at least each minute; and the most it allows, its Scala and its engine, as of its last ask. A runner of a release
+before step 9 names no matches when it asks; the server leaves it as it was, playing as many at once as its file's
+`runners` says, in its file's windows, until it is updated. An updated runner reads its file's `runners` no more from
+9a, and its windows no more from 9b, and says so as it starts. Only the owner's
 max-9950 runs a runner yet, 1 match at once at any hour, so every machine starts so on the server, and no file's
 settings are carried there.
 
@@ -481,7 +488,8 @@ Each step ends in something that runs, and is a pull request of its own.
      and by `sc2scala runner set` and `runner list`; the server leasing it no more matches than its number, and voiding
      the leases its runner no longer plays; the runner naming its matches, the most it allows, its Scala and its
      engine when it asks, and following a change with no restart; `max_matches_at_once` in `runner.toml`, where its
-     windows stay until 9b. Tried on max-9950 while it plays test-ladder: its number raised and lowered, and it paused
+     windows stay until 9b; and the README and the guides, [WSL2](wsl2.md)'s among them, sending people to the page
+     rather than to the file. Tried on max-9950 while it plays test-ladder: its number raised and lowered, and it paused
      and resumed, from the page.
    - 9b: its windows in the pages too, read by the server in the machine's local time, which each ask gives.
 

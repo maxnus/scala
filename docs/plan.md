@@ -12,14 +12,18 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 1. **One server, which anyone can host.** It holds the accounts, bots, ladders, matches, replays and ratings, and serves
    the ladders' pages. The owner hosts the first one; nothing in the app assumes it is the only one. Peer to peer was
    dropped: ratings and the match queue need one record of what happened.
-2. **The games are played by AI Arena's match controller**,
-   [`aiarena/sc2-ai-match-controller`](https://github.com/aiarena/sc2-ai-match-controller) (Rust, GPL-3.0), in the
-   Docker images [`local-play-bootstrap`](https://github.com/aiarena/local-play-bootstrap) runs: `arenaclient-sc2`,
-   `arenaclient-bot` and `arenaclient-proxy`, v0.8.0 at the time of writing. The runner drives them as a separate
-   program, from a match file and a compose file, and reads back the result and the replay. They already run each bot
-   in a container of its own, put a proxy between the bots and the game that enforces the time limits and blocks debug
-   commands, decide a crash's result, and start every bot type AI Arena takes, so an AI Arena bot plays here unchanged.
-   The engine sits behind an interface of Scala's own, so that one written on `sc2nachos` could replace it.
+2. **The games are played by Scala's own engine**, in Python, in AI Arena's Docker images for the game and for the
+   bots (the owner, 2026-11-01, for step 8, reversing the first choice, AI Arena's match controller). Steps 1 to 7 ran
+   [`aiarena/sc2-ai-match-controller`](https://github.com/aiarena/sc2-ai-match-controller) (Rust, GPL-3.0) in the
+   images [`local-play-bootstrap`](https://github.com/aiarena/local-play-bootstrap) runs, v0.8.0. Those come from
+   upstream's `v0` branch, which AI Arena keeps for playing on one's own machine and changed once since it split from
+   `master` in March 2025, while aiarena.net runs `master`, rewritten for its Kubernetes cluster, which hard-codes the
+   game's limits; and "v0.8.0" names the bot environment inside, not a release, the last GitHub release being v0.6.10
+   of 2024. Everything wanted next needed changes to it: [computer opponents](#computer-opponents), which it cannot
+   seat; the step-time limit, which it reads and ignores, as aiarena.net's does; and the bot environment aiarena.net
+   has moved on to. Scala's
+   engine keeps what made AI Arena's worth taking, its contract with the bots, so that an AI Arena bot plays here
+   unchanged, as [the engine](#the-engine) says.
 3. **A runner serves the ladders its owner picks**: every public ladder, a list of ladders, or both. A
    password-protected ladder's matches go only to runners whose owners gave its password. A bot's files go only to the
    machines of ladders its author entered it in, and a ladder's owner can remove a runner and void its results.
@@ -29,8 +33,8 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
    lists rate engines this way (CCRL, with BayesElo). A new version of a bot starts a new rating.
 5. **The engine is Linux, and Windows runs it in WSL2.** The app, Docker and the engine run inside the WSL2
    distribution, and the server's pages open in the Windows browser, as [the WSL2 guide](wsl2.md) says, untested so
-   far. Windows bots do not play for now: the engine's code starts a `cppwin32` bot under Wine, but its v0.8.0 bot
-   image holds none (found in step 2).
+   far. Windows bots do not play for now: AI Arena's engine starts a `cppwin32` bot under Wine, but its bot image
+   holds none (found in step 2), so Scala's refuses one.
 6. **A repository of its own, in Python**: `maxnus/scala`, shipped as `sc2scala`, the package, the import and the
    command, as NachOS ships as `sc2nachos`. Bots talk to the engine through the ladder's command line (`--GamePort`,
    `--StartPort`, `--LadderServer`, `--OpponentId`), so a bot on any library plays.
@@ -48,6 +52,10 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
 11. **Adding a runner is far smoother than [the sandbox](sandbox.md)'s steps by hand**, a dozen commands with sudo
     among them, since contributors add runners to ladders that are not theirs (the owner, 2026-10-31, for step 7c).
     [Adding a runner](#adding-a-runner) proposes one command.
+12. **A ladder may hold the game's built-in computer** as opponents for its bots (the owner, 2026-11-01, for step 8):
+    each of a race, Terran, Zerg, Protoss or random, a difficulty, one of the game's ten, and a build, one of its
+    five or random, and as many as its owner adds. A random race is the game's own, so that the bot is not told it,
+    rather than one Scala rolls. Two computers never play each other.
 
 ## Design
 
@@ -63,7 +71,7 @@ bot's folder holds (`BotType.from_folder`), and the engine starts the bot as its
 | `<name>.dll` | `dotnet <name>.dll` | `dotnetcore` |
 | `<name>.jar` | `java -jar <name>.jar` | `java` |
 | `<name>.js` | `node <name>.js` | `nodejs` |
-| `<name>.exe` | `wine <name>.exe`, refused: the v0.8.0 bot image holds no Wine | `cppwin32` |
+| `<name>.exe` | refused: AI Arena's bot image holds no Wine to run it | `cppwin32` |
 | `<name>` | `./<name>` | `cpplinux` |
 
 The engine finds the entry point by the bot's name, so a name follows its rules, and an upload is checked for one when
@@ -77,9 +85,13 @@ matches, ratings and name stay.
 ### Ladders
 
 A ladder is a name, an owner, an optional password, a map pool and the engine's limits: the game time, the time a bot
-may take for one step, and the real time a match may take. They default to those of AI Arena's local setup: 80640
-steps, an hour of game time; 40 ms, with ten strikes; and two hours. A game that reaches its game time ends as a tie.
-Anyone can create a ladder.
+may take for one step, and the real time a match may take. The game time and the real time default to those of AI
+Arena's local setup: 80640 steps, an hour of game time, and two hours. A game that reaches its game time ends as a
+tie. The step-time limit is off unless the ladder's owner sets one, a time and a number of strikes (the owner,
+2026-11-01, for step 8a): AI Arena's local setup writes 40 ms with ten strikes, but neither its v0.8.0 engine nor
+aiarena.net's applies them, so that a bot that plays there unchanged may take up to the 30 seconds they allow any
+request, and would lose here by a limit it never met. Anyone can create a ladder, and its owner may add
+[computer opponents](#computer-opponents) to it.
 
 Whoever gives a protected ladder's password once becomes a member. Members alone can enter bots, serve it with a
 runner, and see its pages, matches and replays. A public ladder's pages are open to everyone, and anyone signed in can
@@ -107,6 +119,13 @@ matches made in advance. The server picks:
 2. two different active bots of it, uniformly at random, in random seats;
 3. a map of its pool, uniformly at random.
 
+A ladder with [computer opponents](#computer-opponents) draws its two players among its bots and its computers alike,
+any pair but two computers, uniformly, and plays once it has one bot and one computer. Every ladder's weight is then
+its number of active bots over the bots one of its matches seats on average, 2 for a pair of bots and 1 for a bot and
+a computer, which for a ladder of bots alone is half its bots, as before but for the scale; so a bot still gets about
+as many games whichever ladder it is in. A ladder of 2 bots and 6 computers has 13 pairs, 12 of which seat one bot,
+and weighs 2 / (14 / 13), about 1.9, against 1 for a ladder of 2 bots alone.
+
 The match is leased to the runner until a deadline, the ladder's real-time limit and a margin. A result after the
 deadline, or none, voids it; the next match is drawn afresh, so none is played again. A bot may play several matches at
 once, since nothing it keeps carries from one to the next ([open](#open)).
@@ -130,6 +149,36 @@ chosen in step 3 as the one that best predicted AI Arena's 2026 season, from
 [the matchmaking prototype](https://github.com/maxnus/sc2-matchmaking-prototype)'s data. A refit of a few thousand games
 takes milliseconds. Since many match-ups are one-sided beyond what the ratings predict (the prototype's finding), a
 ladder's page also shows each pair's record.
+
+### Computer opponents
+
+A ladder's owner adds the game's built-in computer to it, on its settings page or by `sc2scala ladder add-computer`,
+as many as they like, each of:
+
+- a race: Terran, Zerg, Protoss or random;
+- a difficulty: `VeryEasy`, `Easy`, `Medium`, `MediumHard`, `Hard`, `Harder`, `VeryHard`, `CheatVision`,
+  `CheatMoney` or `CheatInsane`;
+- a build: `Rush`, `Timing`, `Power`, `Macro`, `Air` or random.
+
+A computer is named for these, in the protocol's words and in the alphabet of bot names, as
+`Computer-VeryHard-Zerg-Rush` or `Computer-Hard-Random-RandomBuild`, and a ladder holds each such computer once; from
+step 8b a bot's name may not start with `Computer-`, so that no bot passes for one. It plays
+through [Scala's engine](#the-engine), which creates the game with a seat for the bot and one for the computer, in one
+game client, which the bot joins alone; AI Arena's engine always creates a game for two bots.
+
+A random race and a random build are the game's own, `Random` and `RandomBuild`, rather than ones Scala rolls: the bot
+is told its opponent is random, as of a random bot, and the match records the race as random, since the game tells no
+player which race a computer got (NachOS's sweeps found its `race_actual` never filled). The game does tell a bot the
+computer's difficulty and build, in its game information, which stays as it is, as any bot playing the built-in
+computer sees them; the bot's `--OpponentId` is the computer's name.
+
+A computer neither crashes nor runs out of time, and has no logs or step time; an `InitializationError` counts only
+for the bot. It is rated in its ladder as a bot is, a row of the standings, and as one player for good: like a bot's
+version it never changes, but no newer one replaces it, so it plays on and anchors the ladder's ratings over time.
+The ladder's owner pauses or removes it, and one that played is retired rather than deleted, as a bot is (decision
+10), so that its matches keep their player.
+
+Only a runner whose Scala plays computers draws a match with one: a runner names its engine when it asks for a match.
 
 ### Runners
 
@@ -168,21 +217,70 @@ A match of light bots takes about 2.2 GB and 1.5 cores at its peak (step 1), so 
 per 4 cores and 8 GiB. A ladder's default limits let one match take up to 15 GiB: 4 for each bot, 6 for the game and 1
 for the match controller.
 
-The game client, the Linux StarCraft II 4.10, comes in the `arenaclient-sc2` image, so a machine needs only x86-64
-Linux, Docker Engine with Compose, and the app.
+The game client, the Linux StarCraft II 4.10, comes in AI Arena's `arenaclient-sc2` image, so a machine needs only
+x86-64 Linux, Docker Engine with Compose, and the app.
 
 ### The sandbox
 
 A runner executes strangers' code, so every match runs sandboxed, as [the sandbox](sandbox.md) says in full:
 
 - each bot's container with its own bot folder alone, read-only but for its `data` folder and `/tmp`, held in memory;
-- on internal networks, one for each bot and one for the game, so that a bot reaches the proxy and nothing else;
+- on internal networks, one for each bot and one for the game, so that a bot reaches the match controller and nothing
+  else;
 - as the runner's user, with no capabilities and no way to gain any;
 - within each bot's limits of CPU, memory, processes and logs, `ResourceLimits`, set by the ladder;
-- in fresh containers, with nothing of the runner's own, its token least of all, mounted anywhere.
+- in fresh containers, with nothing of the runner's own, its token least of all, mounted anywhere, but for a copy of
+  the engine's code in the match controller's, as [the engine](#the-engine) says.
 
 A runner that plays strangers' bots runs as a user of its own, with rootless Docker, so that a bot that breaks out
 lands as a user who owns nothing of its owner's.
+
+### The engine
+
+Scala's engine plays one match in Docker containers, as AI Arena's did, behind the same interface, `MatchEngine`, so
+that in step 8a the runner, the server and the sandbox stay as they are; step 8b then gives a match, the match a runner
+is offered and the files it reports a computer's seat:
+
+- **the game**: a Linux StarCraft II 4.10 for each bot, from AI Arena's `arenaclient-sc2` image, started directly
+  rather than by the image's own controller;
+- **each bot**, in AI Arena's bot environment, the image `arenaclient-bot-base`, started as AI Arena starts it: in its
+  folder, as [its type](#bots) says, with `--GamePort` and `--StartPort` naming the match controller's port,
+  `--LadderServer` its address and `--OpponentId` the opponent's name, and its output in its log; a bot that exits
+  within its first seconds failed to start;
+- **the match controller**, Scala's own, between the bots and the game, in a container on every network of the match.
+
+The match controller does what AI Arena's does, as its v0.8.0 source shows:
+
+- it creates the game itself, with a seat for each bot, or for the bot and [the computer](#computer-opponents);
+- it passes each bot's `JoinGame` on with its seat's race, its name and the match's ports, or no ports for a bot that
+  plays the computer, alone in its game, then each of its requests to the game and the answer back;
+- it answers a debug request itself, with an empty answer, so that no bot cheats;
+- in the game's information, it names both players, and shows the opponent's race as requested, so that a random
+  opponent stays random;
+- it ends a game that reaches its game time as a tie, and saves the replay however the game ends;
+- it decides the result: the game's; a crash for a bot whose connection breaks; a time-out for one that sends nothing
+  for 30 seconds; and a loss for one that leaves the game;
+- it reports the game's steps, and each bot's average step time, its own time between the game's answers and its next
+  requests over the game's steps, as AI Arena's counts it.
+
+Beyond AI Arena's, it applies a step-time limit, where the ladder sets one. A bot's step lasts from the game's answer
+to one step request to its next, less the time the game took meanwhile to answer its other requests; each step longer
+than `max_step_time_ms` is a strike, and a bot that reaches `step_time_strikes` loses by a time-out. The results stay
+those of the table above.
+
+The images are AI Arena's, at tags Scala pins; the bot environment's is Scala's choice, v0.8.0 as now or v0.9.0 as
+aiarena.net's, which step 8a settles by trying bots on both. The match controller runs from an image the runner pulls
+anyway, the bot environment's say, whose Python, 3.12 in v0.8.0, runs Scala's code, so that Scala publishes no image of
+its own;
+which image, step 8a settles too. Its code and the few packages it needs are copied into the match's work folder and
+mounted read-only from there, and nothing else of the runner's: not its home, its install, its config or its token,
+since every bot reaches that container.
+
+The match controller is tested in-process, against a fake game and fake bots, for each way a game can end, with no
+Docker; tests that start containers are marked `integration`, as now. Until step 8c, AI Arena's engine stays, chosen
+by `engine` in `runner.toml` and `sc2scala play --engine`, so that both can play the same matches. Before it goes,
+bots of every type play test-ladder through Scala's: Python on `sc2nachos` and on python-sc2, and a bot each of .NET,
+Java, Node.js and a Linux binary.
 
 ### Adding a runner
 
@@ -316,15 +414,27 @@ Each step ends in something that runs, and is a pull request of its own.
      `tools/try_runner_setup.py`, which tried it in fresh Ubuntu 24.04 and 26.04 VMs under KVM on max-9950, each from
      nothing to a runner that played a match, against a server of the branch rather than the public one, and then
      updated and removed it. The guides, [the sandbox](sandbox.md) and [WSL2](wsl2.md), send people to the command,
-     and keep the steps by hand for the rest. Left: max-9950 itself, on the public server, playing test-ladder's first
-     matches.
+     and keep the steps by hand for the rest. max-9950 itself serves test-ladder on the public server since
+     2026-11-01, set up by the command, and waits for the ladder's bots.
+8. **Scala's own engine, and computer opponents**, as [the engine](#the-engine) and
+   [computer opponents](#computer-opponents) say, in three pull requests:
+   - 8a: Scala's engine playing bot against bot, with a ladder's step-time limit applied where it sets one, off by
+     default, and the ladder's pages to set it; tried with bots of every type in `sc2scala play`. AI Arena's stays
+     the default until 8c, and a runner plays with Scala's by `engine` in its `runner.toml`, as max-9950 does on
+     test-ladder; `runner pull` fetches the images of both, which the setup script's check of free space allows for.
+   - 8b: computer opponents, on the server, its pages and the CLI, in the draw and the ratings, and in the engine.
+   - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's
+     machines; `runner pull`, the setup script and the guides then fetch only the images Scala's uses.
 
 ## Open
 
-- **The license.** NachOS is MIT. The engine is GPL-3.0, and Scala only runs its images, as separate programs. It is
-  needed before Scala goes on PyPI, from which strangers' runners install it.
+- **The license.** NachOS is MIT. AI Arena's code is GPL-3.0; Scala runs its images as separate programs, and its
+  engine is written to the behavior AI Arena's source and its bots show, not translated from that code. It is needed
+  before Scala goes on PyPI, from which strangers' runners install it.
 - **Updating runners**: running the setup command again updates one. The server could tell a runner that its Scala is
-  too old for it, once a change needs every runner updated.
+  too old for it, once a change needs every runner updated; step 8b's runner naming its engine is a start.
+- **Which bots try each type** in step 8a: open-source ones, whose licenses let a runner play them.
+- **A random computer's race**, read from the replay once the match is over, for the match's page.
 - **Other Linux distributions** for the setup script, once someone asks. Debian 13 should take it, where Debian 12's
   packages hold no Compose 2.20, which the engine needs; Fedora and Arch have rootless Docker too.
 - **What a bot keeps between games**, as AI Arena's `data` folder: left out. With it, a bot plays one match at a time.
@@ -336,6 +446,7 @@ Each step ends in something that runs, and is a pull request of its own.
 ## Prior art
 
 [AI Arena](https://aiarena.net) runs its own competitions, on arena clients that fetch its matches, and its code is
-open: the site, [`aiarena-web`](https://github.com/aiarena/aiarena-web) (Django), and the match controller above, both
+open: the site, [`aiarena-web`](https://github.com/aiarena/aiarena-web) (Django), and its match controller, which
+decision 2 tells of, both
 GPL-3.0. Scala adds what AI Arena does not have: anyone's ladders, protected ladders, and runners that choose their
 ladders and their hours.

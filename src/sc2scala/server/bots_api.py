@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from sc2scala.bot import is_valid_bot_name
 from sc2scala.bot_archive import type_of_bot_archive
+from sc2scala.computer import COMPUTER_NAME_PREFIX, is_computer_name
 from sc2scala.race import Race
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.models import BotRecord, BotVersion, Ladder, LadderEntry, MatchRecord, User, utc_now
@@ -59,13 +60,15 @@ def upload_bot_version(
     """Stores `archive` as the next version of the user's bot `name`, made of `race` if it is new, and returns the bot,
     the version, and whether the version is new, rather than one the bot holds already.
 
-    Raises `HTTPException` if the name is not a bot's, the bot is someone else's, a new bot has no race, or the race is
-    none; `UploadRefusedError` if the zip is not a bot's.
+    Raises `HTTPException` if the name is not a bot's, a computer's among them, the bot is someone else's, a new bot
+    has no race, or the race is none; `UploadRefusedError` if the zip is not a bot's.
     """
     bot = bot_named(session, name)
     if bot is None:
         if not is_valid_bot_name(name) or len(name) > _MAX_BOT_NAME_LENGTH:
             raise HTTPException(422, f"A bot's name is letters, digits, '_', '-' and '.', 50 at most, not {name!r}")
+        if is_computer_name(name):
+            raise HTTPException(422, f"A bot's name may not begin with {COMPUTER_NAME_PREFIX}, which names a computer")
         if race is None:
             raise HTTPException(422, "A new bot needs a race: T, Z, P or R")
     elif bot.owner_id != user.id:

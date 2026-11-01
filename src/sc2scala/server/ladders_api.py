@@ -13,9 +13,10 @@ from sc2scala.errors import UploadRefusedError
 from sc2scala.server.bots_api import RemovalOutcome, bot_named, commit_or_conflict, removal_summary
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_limits import limits_changed
-from sc2scala.server.ladder_ratings import Standing, standings
+from sc2scala.server.ladder_ratings import ComputerStanding, Standing, playing_computers, standings
 from sc2scala.server.models import (
     Ladder,
+    LadderComputer,
     LadderEntry,
     LadderMember,
     MapFile,
@@ -119,6 +120,7 @@ def all_ladders(session: DatabaseSession, user: TokenUser) -> list[dict[str, Any
             selectinload(Ladder.owner),
             selectinload(Ladder.maps),
             selectinload(Ladder.entries),
+            selectinload(Ladder.computers),
             selectinload(Ladder.members),
         )
         .order_by(Ladder.name)
@@ -311,7 +313,7 @@ def enter_in_ladder(session: Session, user: User, name: str, bot_name: str) -> L
 def withdraw_from_ladder(session: Session, user: User, name: str, bot_name: str) -> Ladder:
     """Takes the bot out of the ladder, for its author or the ladder's owner; 403 for anyone else, and 409 in a retired
     ladder, whose standings stay as they ended."""
-    ladder = _open_ladder(visible_ladder(session, name, user))
+    ladder = open_ladder(visible_ladder(session, name, user))
     entry = _entry_of(ladder, bot_name)
     if not may_withdraw(entry, user):
         raise HTTPException(
@@ -363,17 +365,24 @@ def may_enter(ladder: Ladder, user: User | None) -> bool:
 
 @router.get("/{name}/standings")
 def ladder_standings(session: DatabaseSession, user: TokenUser, name: str) -> list[dict[str, Any]]:
-    """The ladder's entered bots by their latest versions' ratings, the unrated last."""
+    """The ladder's entered bots by their latest versions' ratings, and its computers by theirs, the unrated last."""
     return [standing_summary(standing) for standing in standings(session, visible_ladder(session, name, user))]
 
 
-def standing_summary(standing: Standing) -> dict[str, Any]:
+def standing_summary(standing: Standing | ComputerStanding) -> dict[str, Any]:
     rating = standing.rating
+    if isinstance(standing, ComputerStanding):
+        player = computer_summary(standing.computer)
+    else:
+        player = {
+            "bot": standing.entry.bot.name,
+            "author": standing.entry.bot.owner.login,
+            "race": standing.entry.bot.race,
+            "version": standing.version.number,
+            "paused": standing.entry.paused,
+        }
     return {
-        "bot": standing.entry.bot.name,
-        "author": standing.entry.bot.owner.login,
-        "race": standing.entry.bot.race,
-        "version": standing.version.number,
+        **player,
         "rating": standing.displayed_rating,
         "interval": standing.interval,
         "games": rating.games if rating else 0,
@@ -381,7 +390,17 @@ def standing_summary(standing: Standing) -> dict[str, Any]:
         "losses": rating.losses if rating else 0,
         "ties": rating.ties if rating else 0,
         "crashes": rating.crashes if rating else 0,
-        "paused": standing.entry.paused,
+    }
+
+
+def computer_summary(held: LadderComputer) -> dict[str, Any]:
+    computer = held.computer
+    return {
+        "computer": computer.name,
+        "race": computer.race.value,
+        "difficulty": computer.difficulty.value,
+        "build": computer.build.value,
+        "paused": held.paused,
     }
 
 
@@ -410,7 +429,12 @@ def ladder_summary(ladder: Ladder, user: User | None) -> dict[str, Any]:
         "retired_at": ladder.retired_at.isoformat() if ladder.retired_at else None,
     }
     if not ladder.is_protected or is_member(ladder, user):
-        summary |= {"maps": len(ladder.maps), "bots": len(ladder.entries), "member": is_member(ladder, user)}
+        summary |= {
+            "maps": len(ladder.maps),
+            "bots": len(ladder.entries),
+            "computers": len(playing_computers(ladder)),
+            "member": is_member(ladder, user),
+        }
     return summary
 
 
@@ -430,6 +454,7 @@ def ladder_details(ladder: Ladder, user: User) -> dict[str, Any]:
             }
             for entry in sorted(ladder.entries, key=lambda entry: entry.bot.name.lower())
         ],
+        "computers": [computer_summary(computer) for computer in playing_computers(ladder)],
     }
 
 
@@ -448,7 +473,7 @@ def owned_ladder(session: Session, name: str, user: User) -> Ladder:
     return ladder
 
 
-def _open_ladder(ladder: Ladder) -> Ladder:
+def open_ladder(ladder: Ladder) -> Ladder:
     """The ladder, unless it is retired: 409 then, since its standings stay as they ended."""
     if ladder.retired_at is not None:
         raise HTTPException(409, f"{ladder.name} is retired: its standings stay as they ended")
@@ -463,7 +488,7 @@ def _entry_of(ladder: Ladder, bot_name: str) -> LadderEntry:
 
 
 def _authors_entry(session: Session, name: str, bot_name: str, user: User) -> LadderEntry:
-    entry = _entry_of(_open_ladder(visible_ladder(session, name, user)), bot_name)
+    entry = _entry_of(open_ladder(visible_ladder(session, name, user)), bot_name)
     if entry.bot.owner_id != user.id:
         raise HTTPException(403, f"{entry.bot.name} is {entry.bot.owner.login}'s")
     return entry

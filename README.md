@@ -22,8 +22,8 @@ On a server's pages, once signed in:
   your bot there, and pause or withdraw it there or on the bot's page. A protected ladder's page asks for its password
   first.
 - **Your own ladders:** make one from the home page, of its maps and with the engine's limits. Its settings page
-  changes its password, limits and maps, and deletes it, if it never drew a match, or else retires it: it draws no
-  more, and keeps its standings, matches and name. Its runners page lists the machines that played its matches, where
+  changes its password, limits and maps, adds the game's built-in computer as opponents for its bots, and deletes it,
+  if it never drew a match, or else retires it: it draws no more, and keeps its standings, matches and name. Its runners page lists the machines that played its matches, where
   you may bar one: it then plays none of them, and the results it reported are void, unless you keep them.
 - **Your page:** your bots, your runner machines and which ladders each serves, and the tokens your command line and
   runners act with.
@@ -99,6 +99,8 @@ uv run sc2scala ladder standings night-league
 `--protect` asks for a password, which others give with `sc2scala ladder join`. `sc2scala ladder runners LADDER` lists
 the machines that played a ladder's matches, and its owner bars one with `sc2scala ladder bar-runner LADDER
 OWNER/MACHINE`, which voids its results there unless given `--keep-results`, and lifts the bar with `unbar-runner`.
+`sc2scala ladder add-computer LADDER --race Z --difficulty VeryHard --build Rush` adds the game's built-in computer,
+which plays the ladder's bots, never another computer, and is rated as a bot is; only runners on Scala's engine play it.
 `sc2scala bot remove BOT` and `sc2scala ladder remove LADDER` delete or retire, as the pages do, once you confirm.
 `sc2scala --help` lists the rest.
 
@@ -114,7 +116,8 @@ uv run sc2scala play path/to/MyBot path/to/OtherBot --map path/to/PylonAIE_v4.SC
 A bot is a folder named for it, in AI Arena's layout, as above. The match is written to `matches/<time>-<bot>-vs-<bot>`,
 or the empty folder `--output` names: `result.json`, the replay, and `logs`, which holds each bot's own logs in
 `player_1-<name>` and `player_2-<name>`, and the engine's. `--engine scala` plays it with Scala's own engine, which
-step 8 of [the plan](docs/plan.md) brings in, rather than AI Arena's.
+step 8 of [the plan](docs/plan.md) brings in, rather than AI Arena's, and which alone plays the game's built-in computer,
+named in place of the second bot as `Computer-<difficulty>-<race>-<build>`, such as `Computer-VeryHard-Zerg-Rush`.
 
 ## Running a server
 

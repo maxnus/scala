@@ -140,3 +140,63 @@ def test_the_migration_takes_the_old_default_step_time_limit_out_but_keeps_one_s
         rows = connection.execute(text("SELECT game_limits FROM ladders ORDER BY id")).scalars().all()
         assert [json.loads(row)["max_step_time_ms"] for row in rows] == [40, 60]
     engine.dispose()
+
+
+def test_the_migration_to_computers_keeps_every_bot_entry_match_and_rating(tmp_path: Path) -> None:
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'scala.db'}")
+    config = alembic_config(engine)
+    command.upgrade(config, "5d2c8e1f9a47")
+    rows = [
+        "INSERT INTO users (id, login, created_at) VALUES (1, 'alice', '2026-11-01')",
+        "INSERT INTO ladders (id, name, owner_id, game_limits, resource_limits, created_at)"
+        " VALUES (1, 'league', 1, '{}', '{}', '2026-11-01')",
+        "INSERT INTO maps (id, name, sha256, size_bytes, uploaded_at) VALUES (1, 'Torches', 'm', 1, '2026-11-01')",
+        *(
+            f"INSERT INTO bots (id, name, race, owner_id, created_at) VALUES ({bot}, 'bot{bot}', 'T', 1, '2026-11-01')"
+            for bot in (1, 2)
+        ),
+        *(
+            "INSERT INTO bot_versions (id, bot_id, number, sha256, size_bytes, bot_type, uploaded_at)"
+            f" VALUES ({bot}, {bot}, 1, 'v{bot}', 1, 'python', '2026-11-01')"
+            for bot in (1, 2)
+        ),
+        *(
+            "INSERT INTO ladder_entries (ladder_id, bot_id, entered_at, paused, failed_starts_in_a_row)"
+            f" VALUES (1, {bot}, '2026-11-01', 0, 0)"
+            for bot in (1, 2)
+        ),
+        "INSERT INTO matches (id, ladder_id, map_id, player_1_version_id, player_2_version_id, player_1_race,"
+        " player_2_race, status, drawn_at, deadline, result) VALUES"
+        " (1, 1, 1, 1, 2, 'T', 'T', 'finished', '2026-11-01', '2026-11-01', 'Player1Win')",
+        "INSERT INTO ratings (ladder_id, version_id, rating, standard_error, games, wins, losses, ties, crashes,"
+        " fitted_at) VALUES (1, 1, 10.0, 90.0, 1, 1, 0, 0, 0, '2026-11-01')",
+    ]
+    with engine.begin() as connection:
+        for row in rows:
+            connection.execute(text(row))
+    tables = ("bots", "bot_versions", "ladder_entries", "matches", "ratings")
+
+    def counts() -> list[int]:
+        with engine.connect() as connection:
+            return [connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() for table in tables]
+
+    command.upgrade(config, "head")
+    assert counts() == [2, 2, 2, 1, 1]
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO ladder_computers (id, ladder_id, race, difficulty, build, added_at, paused)"
+                " VALUES (1, 1, 'Z', 'VeryHard', 'Rush', '2026-11-01', 0)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO matches (id, ladder_id, map_id, player_1_version_id, player_2_computer_id, player_1_race,"
+                " player_2_race, status, drawn_at, deadline) VALUES"
+                " (2, 1, 1, 1, 1, 'T', 'Z', 'leased', '2026-11-01', '2026-11-01')"
+            )
+        )
+    assert counts() == [2, 2, 2, 2, 1]
+    command.downgrade(config, "5d2c8e1f9a47")
+    assert counts() == [2, 2, 2, 1, 1]
+    engine.dispose()

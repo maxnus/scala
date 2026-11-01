@@ -8,6 +8,12 @@ from sc2scala.match_result import MatchResult
 class MatchEngine(Protocol):
     """What plays a match."""
 
+    @property
+    def name(self) -> str:
+        """The engine's name, one of `engine_choice.ENGINE_NAMES`, which a runner tells the server, so that it draws
+        only matches the engine plays."""
+        ...
+
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
         """Plays `match` and returns how it ended, with its replay and logs in `output_folder`.
 

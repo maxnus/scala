@@ -7,6 +7,9 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, MetaData, String, Tab
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from sc2scala.computer import Build, Computer, Difficulty
+from sc2scala.race import Race
+
 MACHINE_NAME_LENGTH = 40
 
 
@@ -181,6 +184,9 @@ class Ladder(Base):
     maps: Mapped[list[MapFile]] = relationship(secondary=ladder_maps, order_by=MapFile.name)
     members: Mapped[list["LadderMember"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
     entries: Mapped[list["LadderEntry"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
+    computers: Mapped[list["LadderComputer"]] = relationship(
+        back_populates="ladder", order_by="LadderComputer.id", cascade="all, delete-orphan"
+    )
     barred_runners: Mapped[list["BarredRunner"]] = relationship(back_populates="ladder", cascade="all, delete-orphan")
 
     @property
@@ -227,6 +233,38 @@ class LadderEntry(Base):
             return ""
         because = self.paused_because or ""
         return because if because.startswith("paused") else f"paused: {because}".rstrip(": ")
+
+
+class LadderComputer(Base):
+    """The game's built-in computer as a player of a ladder, of a race, difficulty and build as `Computer` takes them,
+    each such computer once in its ladder. It plays there unless paused.
+
+    One that played is retired rather than deleted when its ladder's owner removes it, at `retired_at`, so that its
+    matches keep their player; added again, it is the same player, its record and rating kept.
+    """
+
+    __tablename__ = "ladder_computers"
+    __table_args__ = (UniqueConstraint("ladder_id", "race", "difficulty", "build"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), index=True)
+    race: Mapped[str] = mapped_column(String(1))
+    difficulty: Mapped[str] = mapped_column(String(20))
+    build: Mapped[str] = mapped_column(String(20))
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
+    paused: Mapped[bool] = mapped_column(default=False)
+    retired_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+    ladder: Mapped[Ladder] = relationship(back_populates="computers")
+
+    @property
+    def computer(self) -> Computer:
+        return Computer(race=Race(self.race), difficulty=Difficulty(self.difficulty), build=Build(self.build))
+
+    @property
+    def name(self) -> str:
+        """The computer's name, as `Computer-VeryHard-Zerg-Rush`."""
+        return self.computer.name
 
 
 runner_machine_ladders = Table(
@@ -291,7 +329,8 @@ class RunnerSetupCode(Base):
 class MatchRecord(Base):
     """A match drawn for a runner: leased to it until `deadline`, then finished with its result, or void.
 
-    Each seat holds the bot's version and the race it played; the files a runner uploaded are kept by their SHA-256.
+    Each seat holds the bot's version and the race it played, but seat 2 holds the computer instead in a match against
+    it; the files a runner uploaded are kept by their SHA-256.
     """
 
     __tablename__ = "matches"
@@ -300,7 +339,12 @@ class MatchRecord(Base):
     ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), index=True)
     map_id: Mapped[int] = mapped_column(ForeignKey("maps.id"))
     player_1_version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), index=True)
-    player_2_version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), index=True)
+    player_2_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bot_versions.id", ondelete="CASCADE"), index=True
+    )
+    player_2_computer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ladder_computers.id", ondelete="CASCADE"), index=True
+    )
     player_1_race: Mapped[str] = mapped_column(String(1))
     player_2_race: Mapped[str] = mapped_column(String(1))
     machine_id: Mapped[int | None] = mapped_column(ForeignKey("runner_machines.id", ondelete="SET NULL"), index=True)
@@ -324,13 +368,29 @@ class MatchRecord(Base):
     ladder: Mapped[Ladder] = relationship()
     map_file: Mapped[MapFile] = relationship()
     player_1_version: Mapped[BotVersion] = relationship(foreign_keys=[player_1_version_id])
-    player_2_version: Mapped[BotVersion] = relationship(foreign_keys=[player_2_version_id])
+    player_2_version: Mapped[BotVersion | None] = relationship(foreign_keys=[player_2_version_id])
+    player_2_computer: Mapped[LadderComputer | None] = relationship()
     machine: Mapped[RunnerMachine | None] = relationship()
     runner_owner: Mapped[User | None] = relationship()
 
     @property
-    def versions(self) -> tuple[BotVersion, BotVersion]:
+    def bot_versions(self) -> tuple[BotVersion, ...]:
+        """The versions of the match's bots, in their seats: player 1's, and player 2's unless it is the computer."""
+        if self.player_2_version is None:
+            return (self.player_1_version,)
         return self.player_1_version, self.player_2_version
+
+    @property
+    def player_names(self) -> tuple[str, str]:
+        """Each seat's bot's name, or the computer's."""
+        return self.player_1_version.bot.name, self.player_2_name
+
+    @property
+    def player_2_name(self) -> str:
+        if self.player_2_computer is not None:
+            return self.player_2_computer.name
+        assert self.player_2_version is not None
+        return self.player_2_version.bot.name
 
     @property
     def runner_name(self) -> str | None:
@@ -364,14 +424,10 @@ class BarredRunner(Base):
         return self.owner_id == machine.owner_id and self.machine_name == machine.name
 
 
-class Rating(Base):
-    """A bot version's rating in a ladder, as last fitted, in Elo points about the ladder's mean, with its standard
-    error and the games it counted."""
+class RatingFigures:
+    """A player's rating in a ladder, as last fitted, in Elo points about the ladder's mean, with its standard error and
+    the games it counted."""
 
-    __tablename__ = "ratings"
-
-    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True)
-    version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), primary_key=True)
     rating: Mapped[float]
     standard_error: Mapped[float]
     games: Mapped[int]
@@ -381,4 +437,24 @@ class Rating(Base):
     crashes: Mapped[int]
     fitted_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
 
+
+class Rating(RatingFigures, Base):
+    """A bot version's rating in a ladder."""
+
+    __tablename__ = "ratings"
+
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("bot_versions.id", ondelete="CASCADE"), primary_key=True)
+
     version: Mapped[BotVersion] = relationship()
+
+
+class ComputerRating(RatingFigures, Base):
+    """A computer's rating in its ladder."""
+
+    __tablename__ = "computer_ratings"
+
+    ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), primary_key=True)
+    computer_id: Mapped[int] = mapped_column(ForeignKey("ladder_computers.id", ondelete="CASCADE"), primary_key=True)
+
+    computer: Mapped[LadderComputer] = relationship()

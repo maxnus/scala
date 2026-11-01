@@ -9,7 +9,7 @@
       {% for player in match.players %}
         <tr>
           <th>Player {{ loop.index }}</th>
-          <td><a href="/bots/{{ player.bot }}">{{ player.bot }}</a> version {{ player.version }}, {{ player.race }}, by {{ player.author }}
+          <td>{% if player.computer %}{{ player.computer }}, the game's built-in computer, {{ player.race }}{% else %}<a href="/bots/{{ player.bot }}">{{ player.bot }}</a> version {{ player.version }}, {{ player.race }}, by {{ player.author }}{% endif %}
             {% if loop.index in readable_logs %} · <a href="/matches/{{ match.id }}/logs/{{ loop.index }}">its logs</a>{% endif %}</td>
         </tr>
       {% endfor %}

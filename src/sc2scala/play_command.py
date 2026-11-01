@@ -7,6 +7,7 @@ from pathlib import Path
 from loguru import logger
 
 from sc2scala.bot import Bot
+from sc2scala.computer import Computer, is_computer_name
 from sc2scala.engine_choice import DEFAULT_ENGINE, ENGINE_NAMES, engine_named
 from sc2scala.errors import EngineError
 from sc2scala.match import Match
@@ -23,9 +24,17 @@ def add_play_command(add_parser: Callable[..., argparse.ArgumentParser]) -> None
     play = add_parser(
         "play",
         help="play one match on this machine",
-        description="Plays one match between two bots on this machine, and writes its result, replay and logs.",
+        description="Plays one match between two bots, or a bot and the game's built-in computer, on this machine, and "
+        "writes its result, replay and logs.",
     )
-    play.add_argument("bots", nargs=2, type=Path, metavar="BOT_FOLDER", help="a folder named for its bot")
+    play.add_argument(
+        "players",
+        nargs=2,
+        type=Path,
+        metavar=("BOT_FOLDER", "OPPONENT"),
+        help="a folder named for its bot, and its opponent: another, or the computer, as "
+        "Computer-<difficulty>-<race>-<build>, such as Computer-VeryHard-Zerg-Rush, which Scala's engine alone plays",
+    )
     play.add_argument(
         "--map", required=True, type=Path, dest="map_file", metavar="MAP", help="the .SC2Map file to play on"
     )
@@ -35,7 +44,7 @@ def add_play_command(add_parser: Callable[..., argparse.ArgumentParser]) -> None
         type=_race_from_text,
         default=[Race.RANDOM, Race.RANDOM],
         metavar="RACE",
-        help="each bot's race: T, Z, P or R, or its name (default: R R)",
+        help="each bot's race: T, Z, P or R, or its name (default: R R); the computer's is in its name",
     )
     play.add_argument(
         "--engine",
@@ -76,15 +85,19 @@ def _race_from_text(text: str) -> Race:
 
 
 def _match_from_arguments(args: argparse.Namespace) -> Match:
-    """The match the arguments of `play` name; raises `ValueError` for a folder or a map that is not there."""
-    for folder in args.bots:
+    """The match the arguments of `play` name; raises `ValueError` for a folder or a map that is not there, or an
+    opponent that is neither a folder nor a computer."""
+    bot_folder, opponent = args.players
+    plays_computer = not opponent.is_dir() and is_computer_name(str(opponent))
+    for folder in [bot_folder] if plays_computer else [bot_folder, opponent]:
         if not folder.is_dir():
             raise ValueError(f"{folder} is not a folder")
     if not args.map_file.is_file():
         raise ValueError(f"{args.map_file} is not a file")
-    player_1 = Bot.from_folder(args.bots[0], race=args.races[0])
-    player_2 = Bot.from_folder(args.bots[1], race=args.races[1])
-    return Match(player_1=player_1, player_2=player_2, map_file=args.map_file)
+    player_1 = Bot.from_folder(bot_folder, race=args.races[0])
+    if plays_computer:
+        return Match(player_1=player_1, player_2=Computer.from_name(str(opponent)), map_file=args.map_file)
+    return Match(player_1=player_1, player_2=Bot.from_folder(opponent, race=args.races[1]), map_file=args.map_file)
 
 
 def _check_is_empty_or_missing(output_folder: Path | None) -> None:
@@ -113,8 +126,13 @@ def _new_default_output_folder(match: Match) -> Path:
 
 def _write_result_file(match: Match, result: MatchResult, result_file: Path) -> None:
     players = [
-        {"name": bot.name, "race": bot.race.value, "type": bot.bot_type.value, "average_step_time": step_time}
-        for bot, step_time in zip((match.player_1, match.player_2), result.average_step_times, strict=True)
+        {
+            "name": player.name,
+            "race": player.race.value,
+            "type": "computer" if isinstance(player, Computer) else player.bot_type.value,
+            "average_step_time": step_time,
+        }
+        for player, step_time in zip((match.player_1, match.player_2), result.average_step_times, strict=True)
     ]
     content = {
         "result": result.code.value,

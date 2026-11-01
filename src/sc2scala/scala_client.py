@@ -121,6 +121,19 @@ class ScalaClient:
     def resume_entry(self, ladder: str, bot: str) -> dict[str, Any]:
         return self._request("POST", f"/api/ladders/{ladder}/entries/{bot}/resume")
 
+    def add_computer(self, ladder: str, *, race: str, difficulty: str, build: str) -> dict[str, Any]:
+        body = {"race": race, "difficulty": difficulty, "build": build}
+        return self._request("POST", f"/api/ladders/{ladder}/computers", json=body)
+
+    def remove_computer(self, ladder: str, computer: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/api/ladders/{ladder}/computers/{computer}")
+
+    def pause_computer(self, ladder: str, computer: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/ladders/{ladder}/computers/{computer}/pause")
+
+    def resume_computer(self, ladder: str, computer: str) -> dict[str, Any]:
+        return self._request("POST", f"/api/ladders/{ladder}/computers/{computer}/resume")
+
     def register_machine(self, name: str, *, serves_public: bool, ladders: Sequence[str]) -> dict[str, Any]:
         """Registers a runner machine of the user's; the answer holds its token, once."""
         return self._request(
@@ -166,9 +179,9 @@ class ScalaClient:
     def unbar_runner(self, ladder: str, runner: str) -> dict[str, Any]:
         return self._request("DELETE", f"/api/ladders/{ladder}/barred-runners/{runner}")
 
-    def next_match(self) -> dict[str, Any] | None:
-        """A match for this runner machine to play, or `None` if there is none."""
-        return self._request("POST", "/api/runner/matches")
+    def next_match(self, *, engine: str) -> dict[str, Any] | None:
+        """A match for this runner machine to play with `engine`, the engine's name, or `None` if there is none."""
+        return self._request("POST", "/api/runner/matches", json={"engine": engine})
 
     def download(self, kind: str, sha256: str, destination: Path) -> None:
         """Downloads the runner's file of `kind`, `bots` or `maps`, to `destination`, and checks its SHA-256.

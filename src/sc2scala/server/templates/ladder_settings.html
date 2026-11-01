@@ -48,6 +48,46 @@
     <label>Maps <input type="file" name="maps" accept=".SC2Map" multiple required></label>
     <button type="submit">Add them</button>
   </form>
+  <h2>Computers</h2>
+  <p>
+    The game's built-in computer, as opponents for the bots here: each plays the bots, never another computer, and is
+    rated as a bot is. A random race or build is the game's own pick, which the bot is not told. Only runners on
+    Scala's engine play them.
+  </p>
+  {% if computers %}
+    <table>
+      <tbody>
+        {% for computer in computers %}
+          <tr{% if computer.paused %} class="paused"{% endif %}>
+            <td>{{ computer.name }}</td>
+            <td class="muted">{% if computer.paused %}paused{% endif %}</td>
+            <td class="actions">
+              {% if not ladder.retired_at %}
+                {% set action = "resume" if computer.paused else "pause" %}
+                <form method="post" action="/ladders/{{ ladder.name }}/computers/{{ computer.name }}/{{ action }}" class="inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="link">{{ action | capitalize }}</button>
+                </form>
+                <form method="post" action="/ladders/{{ ladder.name }}/computers/{{ computer.name }}/remove" class="inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="link" title="Deletes it if it never played here, or else retires it, its matches kept; adding it again brings back its record">Remove</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+  {% if not ladder.retired_at %}
+    <form method="post" action="/ladders/{{ ladder.name }}/computers" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Race <select name="race">{% for race in races %}<option value="{{ race.value }}">{{ race.name | capitalize }}</option>{% endfor %}</select></label>
+      <label>Difficulty <select name="difficulty">{% for difficulty in difficulties %}<option{% if difficulty.value == "VeryHard" %} selected{% endif %}>{{ difficulty.value }}</option>{% endfor %}</select></label>
+      <label>Build <select name="build">{% for build in builds %}<option value="{{ build.value }}">{{ "Random" if build.value == "RandomBuild" else build.value }}</option>{% endfor %}</select></label>
+      <button type="submit">Add a computer</button>
+    </form>
+  {% endif %}
   <h2>Limits</h2>
   <p class="note">The next matches take the limits as changed; the matches being played keep theirs.</p>
   <form method="post" action="/ladders/{{ ladder.name }}/limits" class="stacked">

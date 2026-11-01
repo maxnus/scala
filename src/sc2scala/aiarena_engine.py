@@ -52,6 +52,8 @@ class AiArenaEngine:
     One engine plays matches from several threads at once, and `stop_matches` stops them all.
     """
 
+    name = "aiarena"
+
     def __init__(
         self,
         *,
@@ -89,12 +91,17 @@ class AiArenaEngine:
 
         Raises `MatchTimeoutError` if the match runs past its real-time limit and a margin, `MatchStoppedError` if
         `stop_matches` stopped it, and `EngineError` for a Windows bot, or if Docker is missing, a container does not
-        start, or the engine reports no result, and for a bot playing itself, since the game would make both its seats
-        player 1 (in game, 4.10). A match that raises leaves its work folder, but for its copies of the bots and the
-        map.
+        start, or the engine reports no result; for a bot playing itself, since the game would make both its seats
+        player 1 (in game, 4.10); and for the computer, since it creates every game for two bots. A match that raises
+        leaves its work folder, but for its copies of the bots and the map.
         """
+        if match.computer is not None:
+            raise EngineError(
+                f"AI Arena's engine cannot seat the computer, {match.computer.name}: it creates every game for two "
+                "bots; Scala's engine can"
+            )
         refuse_windows_bots(match)
-        if match.player_1.name == match.player_2.name:
+        if match.player_1.name == match.bots[1].name:
             raise EngineError(
                 f"AI Arena's engine cannot play {match.player_1.name} against itself: the game makes two players who "
                 "join under one name one player; Scala's engine can"
@@ -110,7 +117,7 @@ class AiArenaEngine:
             match, work_folder=work_folder, image_tag=self.image_tag, container_user=container_user(self.rootless)
         )
 
-        logger.info(f"Playing {match.player_1.name} against {match.player_2.name} on {match.map_name}")
+        logger.info(f"Playing {match.player_1.name} against {match.bots[1].name} on {match.map_name}")
         try:
             real_time_seconds, seat_over_log_limit = self._compose.play_in_containers(
                 match,
@@ -152,7 +159,7 @@ class AiArenaEngine:
 def _lay_out_work_folder(match: Match, *, work_folder: Path, image_tag: str, container_user: str | None) -> Path:
     """Writes what the engine reads into `work_folder`, and returns the Compose file."""
     work_folder.mkdir()
-    for seat, bot in enumerate((match.player_1, match.player_2), start=1):
+    for seat, bot in enumerate(match.bots, start=1):
         copy_bot(bot, work_folder / "bots" / str(seat) / bot.name)
         (work_folder / "logs" / f"bot_controller{seat}").mkdir(parents=True)
     (work_folder / "maps").mkdir()
@@ -175,7 +182,7 @@ def _matches_line(match: Match) -> str:
     def fields_of(bot: Bot) -> list[str]:
         return [bot.name, bot.name, bot.race.value, bot.bot_type.value]
 
-    return ",".join([*fields_of(match.player_1), *fields_of(match.player_2), match.map_name])
+    return ",".join([*(field for bot in match.bots for field in fields_of(bot)), match.map_name])
 
 
 def _engine_config(limits: GameLimits) -> str:
@@ -274,7 +281,7 @@ def _compose_project(match: Match, *, work_folder: Path, image_tag: str, user: s
                 "networks": [_NETWORKS[2]],
             },
             "bot_controller1": bot_controller(1, match.player_1),
-            "bot_controller2": bot_controller(2, match.player_2),
+            "bot_controller2": bot_controller(2, match.bots[1]),
             _MATCH_CONTROLLER_SERVICE: {
                 "image": f"aiarena/arenaclient-proxy:{image_tag}",
                 **unprivileged,
@@ -321,7 +328,7 @@ def _read_engine_result(results_file: Path, *, compose_log: Path) -> dict[str, A
 def _move_logs(match: Match, *, work_folder: Path, logs_folder: Path) -> None:
     """Moves the controllers' logs into `logs_folder`, and each bot's own as `player_<seat>-<name>`."""
     engine_logs_folder = work_folder / "logs"
-    for seat, bot in enumerate((match.player_1, match.player_2), start=1):
+    for seat, bot in enumerate(match.bots, start=1):
         bot_logs = engine_logs_folder / f"bot_controller{seat}" / bot.name
         if bot_logs.is_dir():
             shutil.move(bot_logs, logs_folder / f"player_{seat}-{bot.name}")

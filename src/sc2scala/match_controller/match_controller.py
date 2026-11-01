@@ -1,5 +1,5 @@
-"""Plays one match between two bots: creates the game, relays each bot's requests to its game client and the answers
-back, and decides how the match ended."""
+"""Plays one match between two bots, or a bot and the game's built-in computer: creates the game, relays each bot's
+requests to its game client and the answers back, and decides how the match ended."""
 
 import asyncio
 import contextlib
@@ -18,7 +18,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-from .controller_config import ControllerConfig, SeatConfig
+from .controller_config import ComputerConfig, ControllerConfig, SeatConfig
 from .step_timing import StepTiming
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def time_out_of(seat: int) -> str:
 @dataclass(frozen=True)
 class ControllerResult:
     """How a match ended: its outcome, the game loops it reached, and each bot's average time for a game loop, in
-    seconds, as AI Arena's controller counts it, `None` for a bot that played none."""
+    seconds, as AI Arena's controller counts it, `None` for a bot that played none and for the computer."""
 
     outcome: str
     game_steps: int
@@ -93,22 +93,28 @@ class MatchController:
     """Plays the match `config` describes, from `play`.
 
     The first event that decides the match decides it: the game's result as a bot sees it, the game reaching its time,
-    a bot that crashes, takes too long, or leaves, or a game client that fails. Before both bots have joined the game,
+    a bot that crashes, takes too long, or leaves, or a game client that fails. Before every bot has joined the game,
     any failure is an initialization error. Once decided, the controller gives the other bot up to a request's time to
     reach the game's end, if the game started, saves the replay if no bot's end did, and stops.
+
+    Against the computer, the game has one client, through which the bot plays alone, and the computer neither crashes
+    nor runs out of time.
     """
 
     def __init__(self, config: ControllerConfig, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.config = config
         self.clock = clock
-        self.seats = (
-            _Seat(1, config.seats[0], opponent=config.seats[1], controller=self),
-            _Seat(2, config.seats[1], opponent=config.seats[0], controller=self),
-        )
+        if config.computer is not None:
+            self.seats = (_Seat(1, config.seats[0], opponent_name=config.computer.name, controller=self),)
+        else:
+            self.seats = tuple(
+                _Seat(number, seat, opponent_name=config.seats[2 - number].name, controller=self)
+                for number, seat in enumerate(config.seats, start=1)
+            )
         self.outcome: str | None = None
         self.listening = asyncio.Event()
-        """Set once the controller listens for the bots, on `bot_ports`."""
-        self.bot_ports: tuple[int, int] = (0, 0)
+        """Set once the controller listens for the bots, on `bot_ports`, one for each seat of a bot."""
+        self.bot_ports: tuple[int, ...] = ()
         self._outcome_decided = asyncio.Event()
         self._game_created = asyncio.Event()
         self._replay_saved = False
@@ -116,7 +122,7 @@ class MatchController:
 
     @property
     def started(self) -> bool:
-        """Whether both bots have joined the game."""
+        """Whether every bot has joined the game."""
         return all(seat.joined for seat in self.seats)
 
     async def play(self) -> ControllerResult:
@@ -127,8 +133,7 @@ class MatchController:
             for seat in self.seats:
                 handler = partial(self._serve_bot, seat)
                 servers.append(await serve(handler, _LISTEN_ADDRESS, seat.config.listen_port, **_WEBSOCKET_OPTIONS))
-            first_port, second_port = (server.sockets[0].getsockname()[1] for server in servers)
-            self.bot_ports = (first_port, second_port)
+            self.bot_ports = tuple(server.sockets[0].getsockname()[1] for server in servers)
             self.listening.set()
             background = [asyncio.create_task(self._start_game()), asyncio.create_task(self._watch_for_bots())]
             await self._outcome_decided.wait()
@@ -144,13 +149,11 @@ class MatchController:
                 if seat.game is not None:
                     await seat.game.close()
         assert self.outcome is not None
+        step_times = [seat.timing.average_step_seconds(seat.game_loop) for seat in self.seats]
         return ControllerResult(
             outcome=self.outcome,
             game_steps=max(seat.game_loop for seat in self.seats),
-            average_step_times=(
-                self.seats[0].timing.average_step_seconds(self.seats[0].game_loop),
-                self.seats[1].timing.average_step_seconds(self.seats[1].game_loop),
-            ),
+            average_step_times=(step_times[0], step_times[1] if len(step_times) == 2 else None),
         )
 
     def decide(self, outcome: str, reason: str) -> None:
@@ -163,7 +166,7 @@ class MatchController:
         self._outcome_decided.set()
 
     def decide_failure(self, outcome: str, reason: str) -> None:
-        """Decides `outcome`, a failure, once both bots have joined the game, and an initialization error before."""
+        """Decides `outcome`, a failure, once every bot has joined the game, and an initialization error before."""
         self.decide(outcome if self.started else INITIALIZATION_ERROR, reason)
 
     async def wait_for_game(self) -> bool:
@@ -199,7 +202,7 @@ class MatchController:
             logger.info(f"Saved the replay from seat {seat.number}'s game client")
 
     async def _start_game(self) -> None:
-        """Connects to both game clients and creates the game through the first."""
+        """Connects to each bot's game client and creates the game through the first."""
         timeout = self.config.start_timeout_seconds
         try:
             async with asyncio.timeout(timeout):
@@ -217,15 +220,17 @@ class MatchController:
             details = response.create_game.error_details or list(response.error)
             self.decide(INITIALIZATION_ERROR, f"the game refused to create the match: {details}")
             return
-        logger.info(f"Created the game on {self.config.map_path}")
+        against = f" against {self.config.computer.name}" if self.config.computer else ""
+        logger.info(f"Created the game on {self.config.map_path}{against}")
         self._game_created.set()
 
     def _create_game_request(self) -> sc2api_pb2.Request:
         participant = sc2api_pb2.PlayerSetup(type=sc2api_pb2.Participant)
+        computer = self.config.computer
         return sc2api_pb2.Request(
             create_game=sc2api_pb2.RequestCreateGame(
                 local_map=sc2api_pb2.LocalMap(map_path=self.config.map_path),
-                player_setup=[participant, participant],
+                player_setup=[participant, _computer_setup(computer) if computer else participant],
                 realtime=False,
             )
         )
@@ -285,10 +290,10 @@ class MatchController:
 class _Seat:
     """A seat of the match: its bot's connection, its game client, and what the controller counts of its game."""
 
-    def __init__(self, number: int, config: SeatConfig, *, opponent: SeatConfig, controller: MatchController) -> None:
+    def __init__(self, number: int, config: SeatConfig, *, opponent_name: str, controller: MatchController) -> None:
         self.number = number
         self.config = config
-        self.opponent = opponent
+        self.opponent_name = opponent_name
         self.controller = controller
         self.bot: ServerConnection | None = None
         self.game: ClientConnection | None = None
@@ -310,7 +315,7 @@ class _Seat:
         """The name the seat joins the game under: its bot's, but the second seat's of a bot that plays itself is told
         apart, since the game makes two players who join under one name one player, both controlling player 1 (in game,
         4.10, `docs/plan.md`'s step 8a)."""
-        if self.number == 2 and self.config.name == self.opponent.name:
+        if self.number == 2 and self.config.name == self.opponent_name:
             return f"{self.config.name} (2)"
         return self.config.name
 
@@ -410,17 +415,22 @@ class _Seat:
             return
 
     def _join_request(self, request: sc2api_pb2.Request) -> sc2api_pb2.Request:
-        """The bot's join, with the seat's race and name and the match's ports, its options as asked but for raw
-        actions affecting the selection, as AI Arena's controller has them."""
+        """The bot's join, with the seat's race and name, and the match's ports, its options as asked but for raw
+        actions affecting the selection, as AI Arena's controller has them.
+
+        A bot that plays the computer joins with no ports, alone in its game: with ports, the game waits for a second
+        player and never starts (in game, 4.10, `docs/plan.md`'s step 8b).
+        """
         asked = request.join_game
         join = sc2api_pb2.RequestJoinGame(race=_RACES[self.config.race], player_name=self.game_name)
         if asked.HasField("options"):
             join.options.CopyFrom(asked.options)
             join.options.raw_affects_selection = True
-        join.shared_port = _SHARED_PORT
-        join.server_ports.game_port = _SERVER_GAME_PORT
-        join.server_ports.base_port = _SERVER_BASE_PORT
-        join.client_ports.add(game_port=_CLIENT_GAME_PORT, base_port=_CLIENT_BASE_PORT)
+        if self.controller.config.computer is None:
+            join.shared_port = _SHARED_PORT
+            join.server_ports.game_port = _SERVER_GAME_PORT
+            join.server_ports.base_port = _SERVER_BASE_PORT
+            join.client_ports.add(game_port=_CLIENT_GAME_PORT, base_port=_CLIENT_BASE_PORT)
         joining = sc2api_pb2.Request(join_game=join)
         if request.HasField("id"):
             joining.id = request.id
@@ -497,12 +507,12 @@ class _Seat:
 
     def _named_game_info(self, response: sc2api_pb2.Response) -> sc2api_pb2.Response:
         """`response` with both players named, and the opponent's race shown as requested, so that a random opponent
-        stays random."""
+        stays random; the computer's difficulty stays as the game shows it."""
         for player in response.game_info.player_info:
             if player.player_id == self.player_id:
                 player.player_name = self.config.name
             else:
-                player.player_name = self.opponent.name
+                player.player_name = self.opponent_name
                 player.race_actual = player.race_requested
         return response
 
@@ -561,6 +571,16 @@ async def _addresses_of(host: str) -> set[str]:
         else:
             return {str(info[4][0]) for info in infos}
     return set()
+
+
+def _computer_setup(computer: ComputerConfig) -> sc2api_pb2.PlayerSetup:
+    """The computer's seat as the game creates it, its random race and build the game's own pick."""
+    return sc2api_pb2.PlayerSetup(
+        type=sc2api_pb2.Computer,
+        race=_RACES[computer.race],
+        difficulty=sc2api_pb2.Difficulty.Value(computer.difficulty),
+        ai_build=sc2api_pb2.AIBuild.Value(computer.build),
+    )
 
 
 def _parsed_response(response: bytes) -> sc2api_pb2.Response:

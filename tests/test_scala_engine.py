@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,8 @@ from sc2scala import (
     ResultCode,
     ScalaEngine,
 )
-from sc2scala.match_controller.controller_config import ControllerConfig
+from sc2scala.computer import Build, Computer, Difficulty
+from sc2scala.match_controller.controller_config import ComputerConfig, ControllerConfig
 from tests.bot_folders import make_map, make_python_bot
 
 _RESULT_OF_A_WIN = {"outcome": "Player1Win", "game_steps": 4480, "average_step_times": [0.002, None]}
@@ -66,7 +68,9 @@ class FakeDocker:
 
     def _write_what_the_match_writes(self, work_folder: Path) -> None:
         for seat in (1, 2):
-            (work_folder / "logs" / f"player_{seat}" / "stderr.log").write_text(f"seat {seat} played", encoding="utf-8")
+            bot_logs = work_folder / "logs" / f"player_{seat}"
+            if bot_logs.is_dir():
+                (bot_logs / "stderr.log").write_text(f"seat {seat} played", encoding="utf-8")
         (work_folder / "logs" / "game" / "client-1.log").write_text("the game", encoding="utf-8")
         if self.player_1_log_bytes:
             (work_folder / "logs" / "player_1" / "flood.log").write_bytes(b"x" * self.player_1_log_bytes)
@@ -298,6 +302,22 @@ def test_a_bot_can_play_itself(tmp_path: Path, match: Match) -> None:
     mirror = Match(player_1=match.player_1, player_2=match.player_1, map_file=match.map_file)
     output_folder = played(tmp_path, mirror)
     assert (output_folder / ".work" / "bots" / "2" / "basic_bot" / "run.py").is_file()
+
+
+def test_a_bot_plays_the_computer_through_one_game_client_alone(tmp_path: Path, match: Match) -> None:
+    computer = Computer(Race.ZERG, Difficulty.VERY_HARD, Build.RUSH)
+    output_folder = played(tmp_path, replace(match, player_2=computer))
+    config = ControllerConfig.from_file(output_folder / ".work" / "controller" / "match.json")
+    assert [seat.name for seat in config.seats] == ["basic_bot"]
+    assert config.computer == ComputerConfig("Computer-VeryHard-Zerg-Rush", "Z", "VeryHard", "Rush")
+    assert config.replay_file.endswith("/basic_bot-vs-Computer-VeryHard-Zerg-Rush.SC2Replay")
+    project = compose_project(output_folder)
+    networks = {name: service["networks"] for name, service in project["services"].items()}
+    assert networks == {"game": ["game"], "bot_1": ["player_1"], "match_controller": ["player_1", "game"]}
+    game_script = project["services"]["game"]["entrypoint"][-1]
+    assert "-port 5001" in game_script and "-port 5002" not in game_script
+    assert "--OpponentId Computer-VeryHard-Zerg-Rush" in project["services"]["bot_1"]["entrypoint"][-1]
+    assert [path.name for path in (output_folder / "logs").glob("player_*")] == ["player_1-basic_bot"]
 
 
 def test_the_containers_are_created_played_and_removed(tmp_path: Path, match: Match) -> None:

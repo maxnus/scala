@@ -1,5 +1,5 @@
-"""The pages and forms of a ladder's owner: making a ladder, its settings and maps, barring its runners, and removing
-it.
+"""The pages and forms of a ladder's owner: making a ladder, its settings, maps and computers, barring its runners,
+and removing it.
 
 As the bots' forms do, each form calls the function its API route calls, and sends the browser back to a page that
 says once what it did, or why it was refused.
@@ -10,9 +10,18 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from sc2scala.computer import Build, Difficulty
 from sc2scala.errors import UploadRefusedError
+from sc2scala.race import Race
+from sc2scala.server.computers_api import (
+    ComputerRequest,
+    add_computer_to_ladder,
+    computer_asked,
+    pause_computer_in_ladder,
+    remove_computer_from_ladder,
+)
 from sc2scala.server.ladder_limits import LIMIT_GROUPS, limit_values
-from sc2scala.server.ladder_ratings import refit_after_result
+from sc2scala.server.ladder_ratings import playing_computers, refit_after_result
 from sc2scala.server.ladder_runners_api import bar_runner_named, unbar_runner_named
 from sc2scala.server.ladders_api import (
     add_maps,
@@ -112,13 +121,17 @@ def new_ladder(
 
 @router.get("/ladders/{name}/settings", response_class=HTMLResponse)
 def settings_page(request: Request, session: DatabaseSession, user: SignedInUser, name: str) -> HTMLResponse:
-    """The owner's page of the ladder's password, limits and maps, and of removing it."""
+    """The owner's page of the ladder's password, maps, computers and limits, and of removing it."""
     ladder = owned_ladder(session, name, user)
     return render(
         request,
         "ladder_settings.html",
         user=user,
         ladder=ladder,
+        computers=playing_computers(ladder),
+        races=list(Race),
+        difficulties=list(Difficulty),
+        builds=list(Build),
         limit_groups=LIMIT_GROUPS,
         limits=limit_values(game_limits=ladder.game_limits, resource_limits=ladder.resource_limits),
         matches_drawn=matches_in_ladder(session, ladder),
@@ -216,6 +229,80 @@ def remove_map_from_ladder(
     except HTTPException as error:
         return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
     return redirect_with_notice(request, settings, f"Took {map_name} out")
+
+
+@router.post("/ladders/{name}/computers")
+def add_computer(
+    *,
+    request: Request,
+    session: DatabaseSession,
+    user: SignedInUser,
+    name: str,
+    race: Annotated[str, Form()],
+    difficulty: Annotated[str, Form()],
+    build: Annotated[str, Form()] = Build.RANDOM.value,
+    csrf_token: CsrfToken,
+) -> RedirectResponse:
+    """Adds the computer to the ladder, or brings it back if it was retired there."""
+    check_csrf(request, csrf_token)
+    settings = f"/ladders/{name}/settings"
+    try:
+        computer = computer_asked(ComputerRequest(race=race, difficulty=difficulty, build=build))
+        add_computer_to_ladder(session, user, name, computer)
+    except HTTPException as error:
+        return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
+    return redirect_with_notice(request, settings, f"Added {computer.name}")
+
+
+@router.post("/ladders/{name}/computers/{computer_name}/pause")
+def pause_computer(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, computer_name: str, csrf_token: CsrfToken
+) -> RedirectResponse:
+    return _paused_computer(request, session, user, name, computer_name, csrf_token, paused=True)
+
+
+@router.post("/ladders/{name}/computers/{computer_name}/resume")
+def resume_computer(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, computer_name: str, csrf_token: CsrfToken
+) -> RedirectResponse:
+    return _paused_computer(request, session, user, name, computer_name, csrf_token, paused=False)
+
+
+@router.post("/ladders/{name}/computers/{computer_name}/remove")
+def remove_computer(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, computer_name: str, csrf_token: CsrfToken
+) -> RedirectResponse:
+    """Deletes the computer from the ladder if it never played there, or else retires it."""
+    check_csrf(request, csrf_token)
+    settings = f"/ladders/{name}/settings"
+    try:
+        removal = remove_computer_from_ladder(session, user, name, computer_name)
+    except HTTPException as error:
+        return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
+    if removal.retired:
+        return redirect_with_notice(
+            request, settings, f"Retired {removal.name}, which keeps its {removal.matches} matches here"
+        )
+    return redirect_with_notice(request, settings, f"Deleted {removal.name}")
+
+
+def _paused_computer(
+    request: Request,
+    session: DatabaseSession,
+    user: User,
+    name: str,
+    computer_name: str,
+    csrf_token: str,
+    *,
+    paused: bool,
+) -> RedirectResponse:
+    check_csrf(request, csrf_token)
+    settings = f"/ladders/{name}/settings"
+    try:
+        held = pause_computer_in_ladder(session, user, name, computer_name, paused=paused)
+    except HTTPException as error:
+        return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
+    return redirect_with_notice(request, settings, f"{'Paused' if paused else 'Resumed'} {held.name}")
 
 
 @router.post("/ladders/{name}/remove")

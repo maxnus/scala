@@ -8,7 +8,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.game_limits import GameLimits
 from sc2scala.result_code import ResultCode
-from sc2scala.server.models import BotRecord, Ladder, LadderEntry, MatchRecord, RunnerMachine
+from sc2scala.server.models import (
+    BotRecord,
+    BotVersion,
+    Ladder,
+    LadderComputer,
+    LadderEntry,
+    MatchRecord,
+    RunnerMachine,
+)
 
 LEASED = "leased"
 FINISHED = "finished"
@@ -21,34 +29,45 @@ _RESULTS_SHOWING_BOTH_STARTED = frozenset(ResultCode) - {ResultCode.INITIALIZATI
 
 
 def draw_match(
-    session: Session, machine: RunnerMachine, *, rng: random.Random, now: datetime, lease_margin: timedelta
+    session: Session,
+    machine: RunnerMachine,
+    *,
+    rng: random.Random,
+    now: datetime,
+    lease_margin: timedelta,
+    plays_computers: bool,
 ) -> MatchRecord | None:
     """A match for `machine`, leased to it until the ladder's real-time limit and `lease_margin` have passed, or `None`
-    if no ladder it serves has two bots that may play.
+    if no ladder it serves has a pair that may play.
 
-    The ladder is drawn among those with two active bots or more, each weighted by its number of active bots; the two
-    bots uniformly among its active ones, in random seats; and the map uniformly from its pool.
+    A ladder's pairs are any two of its active bots, and, if the machine `plays_computers`, any of its active bots with
+    any of its active computers, but never two computers. The ladder is drawn among those with a pair, each weighted
+    by its active bots over the bots one of its matches seats on average, so that a bot gets about as many games
+    whichever ladder it is in; the pair uniformly among its pairs, two bots in random seats, and a computer always in
+    seat 2, as the game numbers it; and the map uniformly from its pool.
     """
-    candidates = [
-        (ladder, entries) for ladder in served_ladders(session, machine) if len(entries := _active(ladder)) >= 2
-    ]
-    candidates = [(ladder, entries) for ladder, entries in candidates if ladder.maps]
+    candidates = []
+    for ladder in served_ladders(session, machine):
+        bots = _active(ladder)
+        computers = _active_computers(ladder) if plays_computers else []
+        if ladder.maps and _bot_pairs(len(bots)) + len(bots) * len(computers):
+            candidates.append((ladder, bots, computers))
     if not candidates:
         return None
-    ladder, entries = rng.choices(candidates, weights=[len(entries) for _, entries in candidates])[0]
-    player_1, player_2 = rng.sample(entries, 2)
-    version_1 = player_1.bot.latest_version
-    version_2 = player_2.bot.latest_version
-    if version_1 is None or version_2 is None:
-        raise RuntimeError("An active entry's bot has no version")
+    weights = [_weight_of_ladder(len(bots), len(computers)) for _, bots, computers in candidates]
+    ladder, bots, computers = rng.choices(candidates, weights=weights)[0]
+    bot_pairs = _bot_pairs(len(bots))
+    opponent: LadderEntry | LadderComputer
+    if computers and rng.randrange(bot_pairs + len(bots) * len(computers)) >= bot_pairs:
+        entry, opponent = rng.choice(bots), rng.choice(computers)
+    else:
+        entry, opponent = rng.sample(bots, 2)
     real_time_limit = timedelta(seconds=GameLimits(**ladder.game_limits).max_real_time_seconds)
     match = MatchRecord(
         ladder=ladder,
         map_file=rng.choice(ladder.maps),
-        player_1_version=version_1,
-        player_2_version=version_2,
-        player_1_race=player_1.bot.race,
-        player_2_race=player_2.bot.race,
+        player_1_version=_latest_version(entry),
+        player_1_race=entry.bot.race,
         machine=machine,
         runner_owner_id=machine.owner_id,
         runner_machine_name=machine.name,
@@ -56,6 +75,10 @@ def draw_match(
         drawn_at=now,
         deadline=now + real_time_limit + lease_margin,
     )
+    if isinstance(opponent, LadderComputer):
+        match.player_2_computer, match.player_2_race = opponent, opponent.race
+    else:
+        match.player_2_version, match.player_2_race = _latest_version(opponent), opponent.bot.race
     session.add(match)
     return match
 
@@ -71,6 +94,7 @@ def served_ladders(session: Session, machine: RunnerMachine) -> list[Ladder]:
             selectinload(Ladder.members),
             selectinload(Ladder.barred_runners),
             selectinload(Ladder.entries).selectinload(LadderEntry.bot).selectinload(BotRecord.versions),
+            selectinload(Ladder.computers),
         )
     ).all()
     listed = {ladder.id for ladder in machine.ladders}
@@ -99,13 +123,14 @@ def void_expired_leases(session: Session, *, now: datetime) -> None:
 def record_result(session: Session, match: MatchRecord, code: ResultCode, *, now: datetime) -> None:
     """Finishes `match` with `code`, and counts its bots' failed starts in a row.
 
-    `InitializationError` does not say which bot failed to start, so it counts for both; an entry that reaches
-    `MAX_FAILED_STARTS_IN_A_ROW` is paused. A result that shows both bots started forgets the count.
+    `InitializationError` does not say which bot failed to start, so it counts for both, and for the bot alone against
+    the computer, which never fails to start; an entry that reaches `MAX_FAILED_STARTS_IN_A_ROW` is paused. A result
+    that shows both players started forgets the count.
     """
     match.status = FINISHED
     match.result = code.value
     match.finished_at = now
-    for version in match.versions:
+    for version in match.bot_versions:
         entry = session.scalar(
             select(LadderEntry).where(LadderEntry.ladder_id == match.ladder_id, LadderEntry.bot_id == version.bot_id)
         )
@@ -122,3 +147,26 @@ def record_result(session: Session, match: MatchRecord, code: ResultCode, *, now
 
 def _active(ladder: Ladder) -> list[LadderEntry]:
     return [entry for entry in ladder.entries if not entry.paused and entry.bot.latest_version is not None]
+
+
+def _latest_version(entry: LadderEntry) -> BotVersion:
+    version = entry.bot.latest_version
+    if version is None:
+        raise RuntimeError("An active entry's bot has no version")
+    return version
+
+
+def _active_computers(ladder: Ladder) -> list[LadderComputer]:
+    return [computer for computer in ladder.computers if not computer.paused and computer.retired_at is None]
+
+
+def _bot_pairs(bots: int) -> int:
+    return bots * (bots - 1) // 2
+
+
+def _weight_of_ladder(bots: int, computers: int) -> float:
+    """A ladder's weight in the draw: its active bots over the bots one of its matches seats on average, 2 for a pair
+    of bots and 1 for a bot and a computer, which for a ladder of bots alone is half its bots."""
+    bot_pairs = _bot_pairs(bots)
+    computer_pairs = bots * computers
+    return bots * (bot_pairs + computer_pairs) / (2 * bot_pairs + computer_pairs)

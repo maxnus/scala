@@ -16,7 +16,7 @@ import httpx
 from loguru import logger
 
 from sc2scala.client_credentials import ClientCredentials, default_credentials_file
-from sc2scala.engine_choice import engine_named, images_of_every_engine
+from sc2scala.engine_choice import ENGINE_TITLES, engine_named, images_of_every_engine
 from sc2scala.errors import ScalaError, ServerError
 from sc2scala.match_engine import MatchEngine
 from sc2scala.runner import Runner
@@ -249,7 +249,8 @@ def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: Match
             runner.play_next()
             return
         logger.info(
-            f"{credentials.machine} plays up to {_matches(config.runners)} at once for {credentials.server_url}. "
+            f"{credentials.machine} plays up to {_matches(config.runners)} at once for {credentials.server_url}, "
+            f"with {ENGINE_TITLES.get(engine.name, engine.name)}. "
             "Ctrl-C or `sc2scala runner stop` stops it once the matches being played end; a second Ctrl-C, or "
             "`runner stop --now`, stops them too"
         )

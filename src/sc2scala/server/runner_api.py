@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from sc2scala.engine_choice import ENGINES_PLAYING_COMPUTERS
 from sc2scala.errors import UploadRefusedError
 from sc2scala.game_limits import GameLimits
 from sc2scala.resource_limits import ResourceLimits
@@ -45,6 +46,11 @@ class FailureReport(BaseModel):
     reason: str
 
 
+class MatchRequest(BaseModel):
+    engine: str | None = None
+    """The name of the engine the runner plays with; a runner of a release before computer opponents names none."""
+
+
 @router.delete("/machine")
 def remove_this_machine(session: DatabaseSession, machine: Machine) -> dict[str, str]:
     """Removes the machine whose token this is, which then fails, and voids the matches it was playing."""
@@ -54,8 +60,11 @@ def remove_this_machine(session: DatabaseSession, machine: Machine) -> dict[str,
 
 
 @router.post("/matches", response_model=None)
-def next_match(request: Request, session: DatabaseSession, machine: Machine) -> dict[str, Any] | Response:
-    """A match drawn for the machine and leased to it, or 204 if no ladder it serves has two bots that may play."""
+def next_match(
+    request: Request, session: DatabaseSession, machine: Machine, asked: MatchRequest | None = None
+) -> dict[str, Any] | Response:
+    """A match drawn for the machine and leased to it, or 204 if no ladder it serves has a pair that may play; a match
+    against the computer only if the engine it names plays one."""
     now = utc_now()
     void_expired_leases(session, now=now)
     match = draw_match(
@@ -64,6 +73,7 @@ def next_match(request: Request, session: DatabaseSession, machine: Machine) -> 
         rng=request.app.state.match_random,
         now=now,
         lease_margin=timedelta(seconds=request.app.state.config.lease_margin_seconds),
+        plays_computers=asked is not None and asked.engine in ENGINES_PLAYING_COMPUTERS,
     )
     session.commit()
     if match is None:
@@ -74,7 +84,8 @@ def next_match(request: Request, session: DatabaseSession, machine: Machine) -> 
 @router.get("/bots/{sha256}")
 def bot_archive(request: Request, session: DatabaseSession, machine: Machine, sha256: str) -> FileResponse:
     """A bot's zip, for a machine playing a match of it alone."""
-    if not any(version.sha256 == sha256 for match in _leased_matches(session, machine) for version in match.versions):
+    leased = _leased_matches(session, machine)
+    if not any(version.sha256 == sha256 for match in leased for version in match.bot_versions):
         raise HTTPException(403, "The machine plays no match of that bot")
     file_store: FileStore = request.app.state.file_store
     return FileResponse(file_store.path_of(BOT_ARCHIVES, sha256, BOT_ARCHIVE_SUFFIX), media_type="application/zip")
@@ -142,7 +153,8 @@ def report_failure(session: DatabaseSession, machine: Machine, match_id: int, fa
 
 
 def match_for_runner(match: MatchRecord) -> dict[str, Any]:
-    """What a runner needs to play `match`: its bots' and map's files by their hashes, and its limits.
+    """What a runner needs to play `match`: its bots' and map's files by their hashes, the computer in seat 2 if it
+    plays one, and its limits.
 
     A limit that is off is left out, so that a runner of an earlier release, which knows no limit to be off, takes its
     own default instead: AI Arena's engine passes the step-time limit on and applies it not, and a `None` written into
@@ -152,22 +164,34 @@ def match_for_runner(match: MatchRecord) -> dict[str, Any]:
         name: value for name, value in asdict(GameLimits(**match.ladder.game_limits)).items() if value is not None
     }
     races = (match.player_1_race, match.player_2_race)
+    players = [
+        {
+            "seat": seat,
+            "bot": version.bot.name,
+            "race": race,
+            "type": version.bot_type,
+            "version": version.number,
+            "sha256": version.sha256,
+        }
+        for seat, (version, race) in enumerate(zip(match.bot_versions, races, strict=False), start=1)
+    ]
+    if match.player_2_computer is not None:
+        computer = match.player_2_computer.computer
+        players.append(
+            {
+                "seat": 2,
+                "computer": computer.name,
+                "race": computer.race.value,
+                "difficulty": computer.difficulty.value,
+                "build": computer.build.value,
+            }
+        )
     return {
         "id": match.id,
         "ladder": match.ladder.name,
         "deadline": match.deadline.isoformat(),
         "map": {"name": match.map_file.name, "sha256": match.map_file.sha256},
-        "players": [
-            {
-                "seat": seat,
-                "bot": version.bot.name,
-                "race": race,
-                "type": version.bot_type,
-                "version": version.number,
-                "sha256": version.sha256,
-            }
-            for seat, (version, race) in enumerate(zip(match.versions, races, strict=True), start=1)
-        ],
+        "players": players,
         "game_limits": game_limits,
         "resource_limits": asdict(ResourceLimits(**match.ladder.resource_limits)),
     }

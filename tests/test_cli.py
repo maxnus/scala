@@ -6,11 +6,14 @@ import pytest
 
 from sc2scala import EngineError, Match, MatchResult, Race, ResultCode
 from sc2scala.cli import main
+from sc2scala.computer import Build, Computer, Difficulty
 from tests.bot_folders import make_map, make_python_bot
 
 
 class RecordingEngine:
     """Stands in for the engine: records the match it is given, and returns `result` or raises `error`."""
+
+    name = "scala"
 
     def __init__(self, *, error: EngineError | None = None) -> None:
         self.error = error
@@ -67,6 +70,23 @@ def test_races_are_given_by_letter_or_name(tmp_path: Path, play_arguments: list[
     engine = RecordingEngine()
     main([*play_arguments, "--races", "t", "Protoss", "--output", str(tmp_path / "out")], engine=engine)
     assert (engine.matches[0].player_1.race, engine.matches[0].player_2.race) == (Race.TERRAN, Race.PROTOSS)
+
+
+def test_play_takes_the_computer_as_the_opponent_by_its_name(tmp_path: Path, play_arguments: list[str]) -> None:
+    engine = RecordingEngine()
+    play_arguments[2] = "computer-veryhard-zerg-rush"
+    assert main([*play_arguments, "--output", str(tmp_path / "out")], engine=engine) == 0
+    assert engine.matches[0].player_2 == Computer(Race.ZERG, Difficulty.VERY_HARD, Build.RUSH)
+    result = json.loads((tmp_path / "out" / "result.json").read_text(encoding="utf-8"))
+    assert result["players"][1] == {
+        "name": "Computer-VeryHard-Zerg-Rush",
+        "race": "Z",
+        "type": "computer",
+        "average_step_time": 0.004,
+    }
+    play_arguments[2] = "Computer-Hardest-Zerg-Rush"
+    with pytest.raises(SystemExit):
+        main([*play_arguments, "--output", str(tmp_path / "other")], engine=engine)
 
 
 def test_a_bot_folder_that_is_not_there_is_refused(tmp_path: Path, play_arguments: list[str]) -> None:

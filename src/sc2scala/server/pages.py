@@ -223,7 +223,7 @@ def outcome_of(record: MatchRecord) -> str:
         return "being played"
     if record.status == VOID:
         return f"void: {record.void_because}" if record.void_because else "void"
-    bots = [version.bot.name for version in record.versions]
+    bots = record.player_names
     code = ResultCode(record.result) if record.result else None
     winner = {ResultCode.PLAYER_1_WIN: bots[0], ResultCode.PLAYER_2_WIN: bots[1]}.get(code) if code else None
     if winner is not None:
@@ -234,7 +234,9 @@ def outcome_of(record: MatchRecord) -> str:
         ResultCode.PLAYER_2_CRASH: f"{bots[1]} crashed",
         ResultCode.PLAYER_1_TIME_OUT: f"{bots[0]} took too long",
         ResultCode.PLAYER_2_TIME_OUT: f"{bots[1]} took too long",
-        ResultCode.INITIALIZATION_ERROR: "a bot or the game did not start",
+        ResultCode.INITIALIZATION_ERROR: "a bot or the game did not start"
+        if record.player_2_computer is None
+        else f"{bots[0]} or the game did not start",
         ResultCode.ERROR: "the engine failed",
     }
     return described.get(code, "finished") if code else "finished"

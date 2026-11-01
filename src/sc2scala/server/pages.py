@@ -15,6 +15,7 @@ from sc2scala.server.ladder_ratings import (
     INTERVAL_WIDTH,
     PRIOR_SD,
     pair_records,
+    playing_computers,
     rating_of_latest_version,
     standings,
 )
@@ -52,7 +53,12 @@ def ladders_page(request: Request, session: DatabaseSession, user: SignedInUser)
     ladders = session.scalars(
         select(Ladder)
         .where(Ladder.retired_at.is_(None))
-        .options(selectinload(Ladder.owner), selectinload(Ladder.entries), selectinload(Ladder.members))
+        .options(
+            selectinload(Ladder.owner),
+            selectinload(Ladder.entries),
+            selectinload(Ladder.computers),
+            selectinload(Ladder.members),
+        )
         .order_by(Ladder.name)
     )
     shown = [
@@ -62,6 +68,7 @@ def ladders_page(request: Request, session: DatabaseSession, user: SignedInUser)
             "protected": ladder.is_protected,
             "visible": not ladder.is_protected or is_member(ladder, user),
             "bots": len(ladder.entries),
+            "computers": len(playing_computers(ladder)),
         }
         for ladder in ladders
     ]
@@ -223,7 +230,7 @@ def outcome_of(record: MatchRecord) -> str:
         return "being played"
     if record.status == VOID:
         return f"void: {record.void_because}" if record.void_because else "void"
-    bots = [version.bot.name for version in record.versions]
+    bots = record.player_names
     code = ResultCode(record.result) if record.result else None
     winner = {ResultCode.PLAYER_1_WIN: bots[0], ResultCode.PLAYER_2_WIN: bots[1]}.get(code) if code else None
     if winner is not None:
@@ -234,7 +241,9 @@ def outcome_of(record: MatchRecord) -> str:
         ResultCode.PLAYER_2_CRASH: f"{bots[1]} crashed",
         ResultCode.PLAYER_1_TIME_OUT: f"{bots[0]} took too long",
         ResultCode.PLAYER_2_TIME_OUT: f"{bots[1]} took too long",
-        ResultCode.INITIALIZATION_ERROR: "a bot or the game did not start",
+        ResultCode.INITIALIZATION_ERROR: "a bot or the game did not start"
+        if record.player_2_computer is None
+        else f"{bots[0]} or the game did not start",
         ResultCode.ERROR: "the engine failed",
     }
     return described.get(code, "finished") if code else "finished"

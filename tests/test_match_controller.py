@@ -13,7 +13,14 @@ from s2clientprotocol import common_pb2, sc2api_pb2
 import sc2scala.match_controller
 import sc2scala.match_controller.match_controller as match_controller_module
 from sc2scala import ResultCode
-from sc2scala.match_controller.controller_config import ControllerConfig, SeatConfig
+from sc2scala.computer import Build, Difficulty
+from sc2scala.match_controller.controller_config import (
+    BUILDS,
+    DIFFICULTIES,
+    ComputerConfig,
+    ControllerConfig,
+    SeatConfig,
+)
 from sc2scala.match_controller.match_controller import (
     ERROR,
     INITIALIZATION_ERROR,
@@ -28,6 +35,7 @@ from sc2scala.match_controller.step_timing import StepTiming
 from tests.fake_game import FakeBot, FakeGame
 
 _MATCH_SECONDS = 15
+_COMPUTER = ComputerConfig("Computer-VeryHard-Zerg-Rush", "Z", "VeryHard", "Rush")
 
 
 def _config(tmp_path: Path, urls: tuple[str, str], **changes: object) -> ControllerConfig:
@@ -35,7 +43,9 @@ def _config(tmp_path: Path, urls: tuple[str, str], **changes: object) -> Control
     if "seats" in changes:
         seats = changes["seats"]
         assert isinstance(seats, tuple)
-        changes["seats"] = tuple(replace(seat, game_url=url) for seat, url in zip(seats, urls, strict=True))
+        changes["seats"] = tuple(
+            replace(seat, game_url=url) for seat, url in zip(seats, urls[: len(seats)], strict=True)
+        )
     config = ControllerConfig(
         map_path="/maps/Fake.SC2Map",
         seats=(SeatConfig("alpha", "T", urls[0], 0), SeatConfig("beta", "Z", urls[1], 0)),
@@ -50,9 +60,7 @@ def _config(tmp_path: Path, urls: tuple[str, str], **changes: object) -> Control
     return replace(config, **changes)  # type: ignore[arg-type]
 
 
-def _play(
-    tmp_path: Path, game: FakeGame, bots: tuple[FakeBot | None, FakeBot | None], **changes: object
-) -> ControllerResult:
+def _play(tmp_path: Path, game: FakeGame, bots: tuple[FakeBot | None, ...], **changes: object) -> ControllerResult:
     """Plays a match through the fake game between `bots`, leaving out a seat's bot for `None`."""
 
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -77,6 +85,13 @@ def _play(
             await asyncio.wait_for(game.stop(), _MATCH_SECONDS)
 
     return asyncio.run(playing())
+
+
+def _play_computer(tmp_path: Path, game: FakeGame, bot: FakeBot | None, **changes: object) -> ControllerResult:
+    """Plays a match through the fake game between `bot`, or no bot for `None`, and the computer."""
+    computer = changes.pop("computer", _COMPUTER)
+    seats = (SeatConfig("alpha", "T", "", 0),)
+    return _play(tmp_path, game, (bot,), seats=seats, computer=computer, **changes)
 
 
 def test_a_game_played_to_its_end_has_the_result_the_game_gives(tmp_path: Path) -> None:
@@ -251,6 +266,58 @@ def test_a_connection_from_the_seat_s_bot_s_address_is_taken(tmp_path: Path) -> 
     assert result.outcome == win_of(1)
 
 
+def test_a_bot_plays_the_computer_alone_in_a_game_created_with_it_and_joins_with_no_ports(tmp_path: Path) -> None:
+    game = FakeGame(ends_at_loop=80)
+    alpha = FakeBot()
+    result = _play_computer(tmp_path, game, alpha)
+    assert result.outcome == win_of(1)
+    assert result.game_steps == 80
+    assert result.average_step_times[0] is not None and result.average_step_times[1] is None
+    computer = game.requests_of("create_game")[0].create_game.player_setup[1]
+    assert (computer.type, computer.race) == (sc2api_pb2.Computer, common_pb2.Zerg)
+    assert (computer.difficulty, computer.ai_build) == (sc2api_pb2.VeryHard, sc2api_pb2.Rush)
+    join = game.joins[1]
+    assert not join.HasField("shared_port") and not join.HasField("server_ports") and not join.client_ports
+    assert alpha.player_id == 1 and not [client for client, _ in game.requests if client == 2]
+    assert (tmp_path / "match.SC2Replay").is_file()
+
+
+@pytest.mark.parametrize(
+    ("results", "outcome"),
+    [((sc2api_pb2.Defeat, sc2api_pb2.Victory), win_of(2)), ((sc2api_pb2.Tie, sc2api_pb2.Tie), TIE)],
+)
+def test_the_computer_wins_or_ties_as_the_game_says(
+    tmp_path: Path, results: tuple[sc2api_pb2.Result.ValueType, sc2api_pb2.Result.ValueType], outcome: str
+) -> None:
+    assert _play_computer(tmp_path, FakeGame(ends_at_loop=40, results=results), FakeBot()).outcome == outcome
+
+
+@pytest.mark.parametrize(
+    ("ending", "outcome"), [("leave", win_of(2)), ("crash", crash_of(1)), ("silence", time_out_of(1))]
+)
+def test_a_bot_that_leaves_crashes_or_falls_silent_against_the_computer_loses_to_it(
+    tmp_path: Path, ending: str, outcome: str
+) -> None:
+    bot = FakeBot(ends_after_steps=2, ending=ending)
+    assert _play_computer(tmp_path, FakeGame(), bot, request_timeout_seconds=0.5).outcome == outcome
+
+
+def test_a_bot_that_never_connects_to_play_the_computer_is_an_initialization_error(tmp_path: Path) -> None:
+    result = _play_computer(tmp_path, FakeGame(), None, connect_timeout_seconds=0.5)
+    assert result.outcome == INITIALIZATION_ERROR
+
+
+def test_the_game_info_names_the_computer_and_keeps_its_random_race_and_its_difficulty(tmp_path: Path) -> None:
+    alpha = FakeBot()
+    computer = ComputerConfig("Computer-Hard-Random-RandomBuild", "R", "Hard", "RandomBuild")
+    _play_computer(tmp_path, FakeGame(ends_at_loop=16), alpha, computer=computer)
+    game_info = next(response.game_info for response in alpha.responses if response.HasField("game_info"))
+    own, opponent = sorted(game_info.player_info, key=lambda player: player.player_id)
+    assert own.player_name == "alpha"
+    assert (opponent.player_name, opponent.type) == ("Computer-Hard-Random-RandomBuild", sc2api_pb2.Computer)
+    assert (opponent.race_actual, opponent.difficulty) == (common_pb2.Random, sc2api_pb2.Hard)
+
+
 def test_every_outcome_is_a_result_code() -> None:
     outcomes = [TIE, INITIALIZATION_ERROR, ERROR] + [
         outcome(seat) for outcome in (win_of, crash_of, time_out_of) for seat in (1, 2)
@@ -280,10 +347,25 @@ def test_a_step_lasts_from_a_step_s_answer_to_the_next_step_request_and_holds_th
 
 
 def test_the_config_reads_back_as_written(tmp_path: Path) -> None:
-    config = _config(tmp_path, ("ws://game:5001/sc2api", "ws://game:5002/sc2api"), max_step_time_ms=40)
+    urls = ("ws://game:5001/sc2api", "ws://game:5002/sc2api")
+    config = _config(tmp_path, urls, max_step_time_ms=40)
     assert ControllerConfig.from_json(config.to_json()) == config
+    against_computer = _config(tmp_path, urls, seats=(SeatConfig("alpha", "T", "", 0),), computer=_COMPUTER)
+    assert ControllerConfig.from_json(against_computer.to_json()) == against_computer
     with pytest.raises(ValueError):
         SeatConfig("alpha", "X", "", 0)
+    with pytest.raises(ValueError):
+        _config(tmp_path, urls, computer=_COMPUTER)
+    with pytest.raises(ValueError):
+        _config(tmp_path, urls, seats=(SeatConfig("alpha", "T", "", 0),))
+
+
+def test_a_computer_s_difficulty_and_build_are_the_protocol_s_and_scala_s() -> None:
+    assert set(DIFFICULTIES) == set(sc2api_pb2.Difficulty.keys()) == {difficulty.value for difficulty in Difficulty}
+    assert set(BUILDS) == set(sc2api_pb2.AIBuild.keys()) == {build.value for build in Build}
+    for wrong in ({"difficulty": "VeryHrd"}, {"build": "Turtle"}, {"race": "Terran"}):
+        with pytest.raises(ValueError):
+            replace(_COMPUTER, **wrong)
 
 
 def test_the_controller_runs_on_its_own_with_nothing_else_of_scala_s(tmp_path: Path) -> None:

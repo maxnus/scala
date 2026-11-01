@@ -14,6 +14,7 @@ from loguru import logger
 from sc2scala.bot import Bot
 from sc2scala.bot_archive import unpack_bot_archive
 from sc2scala.bot_type import BotType
+from sc2scala.computer import Build, Computer, Difficulty
 from sc2scala.errors import ScalaError, ServerError
 from sc2scala.game_limits import GameLimits
 from sc2scala.match import Match
@@ -118,7 +119,7 @@ class Runner:
 
         Raises `ServerError` if the server cannot be asked, or cannot be told that a match could not be played.
         """
-        offered = self.client.next_match()
+        offered = self.client.next_match(engine=self.engine.name)
         if offered is None:
             self._note("No match to play")
             return False
@@ -156,7 +157,7 @@ class Runner:
 
     def _play(self, offered: dict[str, Any], match_folder: Path) -> bool:
         description = f"Match {offered['id']} in {offered['ladder']}, " + " vs ".join(
-            player["bot"] for player in offered["players"]
+            player.get("bot") or player["computer"] for player in offered["players"]
         )
         try:
             shutil.rmtree(match_folder, ignore_errors=True)
@@ -192,15 +193,20 @@ class Runner:
         return True
 
     def _match_from(self, offered: dict[str, Any], match_folder: Path) -> Match:
-        """The match the server offered, its bots unpacked and its map named in `match_folder`."""
-        bots = [self._bot_from(player, match_folder / "bots" / str(player["seat"])) for player in offered["players"]]
+        """The match the server offered, its bots unpacked and its map named in `match_folder`; player 2 may be the
+        computer."""
+        first, second = offered["players"]
+        player_1 = self._bot_from(first, match_folder / "bots" / "1")
+        player_2 = (
+            _computer_from(second) if "computer" in second else self._bot_from(second, match_folder / "bots" / "2")
+        )
         map_file = match_folder / "maps" / f"{offered['map']['name']}.SC2Map"
         map_file.parent.mkdir(parents=True, exist_ok=True)
         with self._cached("maps", offered["map"]["sha256"]) as cached_map:
             shutil.copyfile(cached_map, map_file)
         return Match(
-            player_1=bots[0],
-            player_2=bots[1],
+            player_1=player_1,
+            player_2=player_2,
             map_file=map_file,
             limits=GameLimits(**offered["game_limits"]),
             resource_limits=ResourceLimits(**offered["resource_limits"]),
@@ -303,6 +309,12 @@ class Runner:
         logger.info(message)
 
 
+def _computer_from(player: dict[str, Any]) -> Computer:
+    return Computer(
+        race=Race(player["race"]), difficulty=Difficulty(player["difficulty"]), build=Build(player["build"])
+    )
+
+
 def _remove_copies(match_folder: Path) -> None:
     """Removes the bots and the map unpacked into a match folder that is kept, which the cache holds anyway."""
     for copies in ("bots", "maps"):
@@ -324,12 +336,13 @@ def _result_report(result: MatchResult) -> dict[str, Any]:
 
 
 def _result_files(match: Match, result: MatchResult, match_folder: Path) -> dict[str, Path]:
-    """The replay, and the logs zipped: each bot's, from its folder, and the engine's, all the rest."""
+    """The replay, and the logs zipped: each bot's, from its folder, and the engine's, all the rest; the computer has
+    none."""
     zips = match_folder / "zips"
     zips.mkdir(parents=True, exist_ok=True)
     files = {"replay": result.replay_file} if result.replay_file else {}
     bot_log_folders = []
-    for seat, bot in enumerate((match.player_1, match.player_2), start=1):
+    for seat, bot in enumerate(match.bots, start=1):
         bot_logs = result.logs_folder / f"player_{seat}-{bot.name}"
         bot_log_folders.append(bot_logs)
         files[f"player_{seat}_logs"] = _zipped(bot_logs, zips / f"player_{seat}.zip", skipping=[])

@@ -45,8 +45,10 @@ def ladder_with_bots(server: TestClient, *, ladder: str = "league", password: st
     return LadderWithBots(server=server, alice=alice, bob=bob, runner=machine_headers(server, alice))
 
 
-def draw(server: TestClient, runner: dict[str, str]) -> dict[str, Any] | None:
-    response = server.post("/api/runner/matches", headers=runner)
+def draw(server: TestClient, runner: dict[str, str], *, engine: str | None = None) -> dict[str, Any] | None:
+    """A match drawn for `runner`, which names `engine`, or names none, as a runner before computer opponents did."""
+    body = {"engine": engine} if engine else None
+    response = server.post("/api/runner/matches", headers=runner, json=body)
     assert response.status_code in (200, 204), response.text
     return response.json() if response.status_code == 200 else None
 

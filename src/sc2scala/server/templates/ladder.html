@@ -20,7 +20,7 @@
     <table>
       <thead>
         <tr>
-          <th class="number">#</th><th>Bot</th><th>Author</th><th>Race</th><th class="number">Version</th>
+          <th class="number">#</th><th>Player</th><th>Author</th><th>Race</th><th class="number">Version</th>
           <th class="number">Rating</th><th class="number">Games</th><th class="number">Won–lost–tied</th>
           <th class="number">Crashes</th><th></th>{% if user %}<th></th>{% endif %}
         </tr>
@@ -28,18 +28,31 @@
       <tbody>
         {% for standing in standings %}
           {% set rating = standing.rating %}
-          <tr{% if standing.entry.paused %} class="paused"{% endif %}>
+          {% set paused = standing.computer.paused if standing.is_computer else standing.entry.paused %}
+          <tr{% if paused %} class="paused"{% endif %}>
             <td class="number">{% if rating %}{{ loop.index }}{% endif %}</td>
-            <td><a href="/bots/{{ standing.entry.bot.name }}">{{ standing.entry.bot.name }}</a></td>
-            <td>{{ standing.entry.bot.owner.login }}</td>
-            <td>{{ standing.entry.bot.race }}</td>
-            <td class="number">{{ standing.version.number }}</td>
+            {% if standing.is_computer %}
+              <td>{{ standing.name }}</td>
+              <td class="muted">the game</td>
+              <td>{{ standing.computer.race }}</td>
+              <td class="number"></td>
+            {% else %}
+              <td><a href="/bots/{{ standing.entry.bot.name }}">{{ standing.entry.bot.name }}</a></td>
+              <td>{{ standing.entry.bot.owner.login }}</td>
+              <td>{{ standing.entry.bot.race }}</td>
+              <td class="number">{{ standing.version.number }}</td>
+            {% endif %}
             <td class="number">{% if rating %}{{ standing.displayed_rating }} <span class="muted">± {{ standing.interval }}</span>{% else %}<span class="muted">unrated</span>{% endif %}</td>
             <td class="number">{{ rating.games if rating else 0 }}</td>
             <td class="number">{% if rating %}{{ rating.wins }}–{{ rating.losses }}–{{ rating.ties }}{% endif %}</td>
             <td class="number">{{ rating.crashes if rating else "" }}</td>
-            <td class="muted">{{ standing.entry.paused_note }}</td>
-            {% if user %}<td class="actions">{{ entry_actions(standing.entry, user, csrf_token, request.url.path, may_withdraw(standing.entry)) }}</td>{% endif %}
+            {% if standing.is_computer %}
+              <td class="muted">{% if paused %}paused by {{ ladder.owner.login }}{% endif %}</td>
+              {% if user %}<td></td>{% endif %}
+            {% else %}
+              <td class="muted">{{ standing.entry.paused_note }}</td>
+              {% if user %}<td class="actions">{{ entry_actions(standing.entry, user, csrf_token, request.url.path, may_withdraw(standing.entry)) }}</td>{% endif %}
+            {% endif %}
           </tr>
         {% endfor %}
       </tbody>
@@ -47,11 +60,12 @@
     </div>
     <p class="note">
       Ratings are a Bradley-Terry fit of every counted game, on the Elo scale, where 1500 is the mean of every version
-      that played here, older versions of these bots among them; ± is the 95% interval. A crash or a time-out counts as a loss, a tie as half a win, and a game that did not start not at
+      and computer that played here, older versions of these bots among them; ± is the 95% interval. The computers are
+      the game's own, which the ladder's owner adds, and play bots alone. A crash or a time-out counts as a loss, a tie as half a win, and a game that did not start not at
       all. A new version starts a new rating, held near the middle at first by a prior of {{ prior_sd | int }} points.
     </p>
   {% else %}
-    <p class="muted">No bot is entered yet.</p>
+    <p class="muted">No bot is entered yet, and no computer added.</p>
   {% endif %}
   {% if may_enter %}
     {% if enterable_bots %}

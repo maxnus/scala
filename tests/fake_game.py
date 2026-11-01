@@ -17,7 +17,10 @@ class FakeGame:
     as the controller and the fake bots ask for.
 
     Player 1 plays through the first client and player 2 through the second. As in a real game, the clients step in
-    lockstep: a step returns once the other client has asked to step as far, or has left or failed. With
+    lockstep: a step returns once the other client has asked to step as far, or has left or failed. A game created
+    with the computer as player 2 has one participant, through the first client, whose steps wait for nobody, and its
+    game information shows the computer's race as requested and its difficulty, but no build, as the real game's
+    does (4.10). With
     `ends_at_loop`, the game ends once a client's loop reaches it, with `results` for each player; a player that leaves
     loses, and the other wins at its next observation. `observation_seconds` delays each answer to an observation.
     With `failing_client`, that client closes its connection at its first step.
@@ -48,6 +51,8 @@ class FakeGame:
         self.requests: list[tuple[int, sc2api_pb2.Request]] = []
         """Each request either client was sent, with the client's number, 1 or 2."""
         self.joins: dict[int, sc2api_pb2.RequestJoinGame] = {}
+        self.computer: sc2api_pb2.PlayerSetup | None = None
+        """The computer's seat, if the game was created with one."""
         self.left: set[int] = set()
         self.game_loops = {1: 0, 2: 0}
         self._failed: set[int] = set()
@@ -108,10 +113,12 @@ class FakeGame:
             if self.refuses_to_create:
                 error = sc2api_pb2.ResponseCreateGame.InvalidMapPath
                 return sc2api_pb2.Response(create_game=sc2api_pb2.ResponseCreateGame(error=error))
+            computers = [setup for setup in request.create_game.player_setup if setup.type == sc2api_pb2.Computer]
+            self.computer = computers[0] if computers else None
             return sc2api_pb2.Response(create_game=sc2api_pb2.ResponseCreateGame(), status=sc2api_pb2.init_game)
         if kind == "join_game":
             self.joins[client] = request.join_game
-            if len(self.joins) == 2:
+            if len(self.joins) == (1 if self.computer else 2):
                 self._both_joined.set()
             await self._both_joined.wait()
             join = sc2api_pb2.ResponseJoinGame(player_id=client)
@@ -140,7 +147,11 @@ class FakeGame:
             self.game_loops[client] += loops
             self._stepped.notify_all()
             await self._stepped.wait_for(
-                lambda: self.game_loops[other] >= self.game_loops[client] or other in self.left | self._failed
+                lambda: (
+                    self.computer is not None
+                    or self.game_loops[other] >= self.game_loops[client]
+                    or other in self.left | self._failed
+                )
             )
 
     async def _mark(self, clients: set[int], client: int) -> None:
@@ -156,8 +167,17 @@ class FakeGame:
                 race_requested=self.joins[client].race if client in self.joins else common_pb2.NoRace,
                 race_actual=self.actual_races[client - 1],
             )
-            for client in (1, 2)
+            for client in ((1,) if self.computer else (1, 2))
         ]
+        if self.computer is not None:
+            players.append(
+                sc2api_pb2.PlayerInfo(
+                    player_id=2,
+                    type=sc2api_pb2.Computer,
+                    race_requested=self.computer.race,
+                    difficulty=self.computer.difficulty,
+                )
+            )
         return sc2api_pb2.ResponseGameInfo(map_name="Fake", player_info=players)
 
     def _observation(self, client: int) -> sc2api_pb2.ResponseObservation:

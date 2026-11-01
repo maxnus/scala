@@ -23,6 +23,8 @@ from tests.match_helpers import REPLAY_BYTES, LadderWithBots, ladder_with_bots
 class FakeEngine:
     """Plays a match by writing what the engine writes: player 1 wins, with a replay and logs; or raises `error`."""
 
+    name = "scala"
+
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.matches: list[Match] = []
@@ -40,7 +42,7 @@ class FakeEngine:
         if self.error is not None:
             raise self.error
         logs = output_folder / "logs"
-        for seat, bot in enumerate((match.player_1, match.player_2), start=1):
+        for seat, bot in enumerate(match.bots, start=1):
             (logs / f"player_{seat}-{bot.name}").mkdir(parents=True)
             (logs / f"player_{seat}-{bot.name}" / "stderr.log").write_text(f"{bot.name} played", encoding="utf-8")
         (logs / "proxy_controller").mkdir()
@@ -177,7 +179,7 @@ class UnreachableAtFirst:
         self.asks_before_stop = asks_before_stop
         self.runner: Runner | None = None
 
-    def next_match(self) -> None:
+    def next_match(self, *, engine: str) -> None:
         self.asks += 1
         if self.runner is not None and self.asks == self.asks_before_stop:
             self.runner.stop()

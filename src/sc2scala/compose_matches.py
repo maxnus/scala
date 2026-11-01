@@ -87,8 +87,8 @@ class ComposeMatches:
         work_folder: Path,
         compose_log: Path,
         controller_service: str,
-        bot_services: tuple[str, str],
-        bot_log_folders: tuple[Path, Path],
+        bot_services: tuple[str, ...],
+        bot_log_folders: tuple[Path, ...],
     ) -> tuple[float, int | None]:
         """Creates the containers of the Compose file in `work_folder`, starts them, waits for `controller_service`
         to end, and removes them, whatever happens.
@@ -183,7 +183,7 @@ def docker_is_rootless() -> bool:
 
 def refuse_windows_bots(match: Match) -> None:
     """Raises `EngineError` for a Windows bot, which the engines' images hold no Wine to run."""
-    for bot in (match.player_1, match.player_2):
+    for bot in match.bots:
         if bot.bot_type == BotType.CPP_WIN32:
             raise EngineError(f"{bot.name} is a Windows bot, and the engine's images hold no Wine to run it")
 

@@ -65,7 +65,7 @@ class CountingClient:
     def __init__(self) -> None:
         self.asks = 0
 
-    def next_match(self) -> None:
+    def next_match(self, *, engine: str) -> None:
         self.asks += 1
 
 

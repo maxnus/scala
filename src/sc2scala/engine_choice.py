@@ -2,11 +2,9 @@
 step 8c of `docs/plan.md` says, or Scala's, by `engine` in `runner.toml` or `sc2scala play --engine`."""
 
 from sc2scala.aiarena_engine import AiArenaEngine
+from sc2scala.engine_names import AIARENA_ENGINE, ENGINE_NAMES, SCALA_ENGINE
 from sc2scala.scala_engine import ScalaEngine
 
-AIARENA_ENGINE = "aiarena"
-SCALA_ENGINE = "scala"
-ENGINE_NAMES = (AIARENA_ENGINE, SCALA_ENGINE)
 DEFAULT_ENGINE = AIARENA_ENGINE
 
 

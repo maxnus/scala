@@ -120,11 +120,12 @@ matches made in advance. The server picks:
 3. a map of its pool, uniformly at random.
 
 A ladder with [computer opponents](#computer-opponents) draws its two players among its bots and its computers alike,
-any pair but two computers, uniformly, and plays once it has one bot and one computer. Every ladder's weight is then
-its number of active bots over the bots one of its matches seats on average, 2 for a pair of bots and 1 for a bot and
-a computer, which for a ladder of bots alone is half its bots, as before but for the scale; so a bot still gets about
-as many games whichever ladder it is in. A ladder of 2 bots and 6 computers has 13 pairs, 12 of which seat one bot,
-and weighs 2 / (14 / 13), about 1.9, against 1 for a ladder of 2 bots alone.
+any pair but two computers, uniformly, the computer always in seat 2, as the game numbers it, and plays once it has one
+bot and one computer. Every ladder's weight is then its number of active bots over the bots one of its matches seats
+on average, 2 for a pair of bots and 1 for a bot and a computer, which for a ladder of bots alone is half its bots, as
+before but for the scale; so a bot still gets about as many games whichever ladder it is in. A ladder of 2 bots and 6
+computers has 13 pairs, 12 of which seat one bot, and weighs 2 / (14 / 13), about 1.9, against 1 for a ladder of 2 bots
+alone.
 
 The match is leased to the runner until a deadline, the ladder's real-time limit and a margin. A result after the
 deadline, or none, voids it; the next match is drawn afresh, so none is played again. A bot may play several matches at
@@ -164,13 +165,13 @@ A computer is named for these, in the protocol's words and in the alphabet of bo
 `Computer-VeryHard-Zerg-Rush` or `Computer-Hard-Random-RandomBuild`, and a ladder holds each such computer once; from
 step 8b a bot's name may not start with `Computer-`, so that no bot passes for one. It plays
 through [Scala's engine](#the-engine), which creates the game with a seat for the bot and one for the computer, in one
-game client, which the bot joins alone; AI Arena's engine always creates a game for two bots.
+game client, which the bot joins alone, as player 1; AI Arena's engine always creates a game for two bots.
 
 A random race and a random build are the game's own, `Random` and `RandomBuild`, rather than ones Scala rolls: the bot
 is told its opponent is random, as of a random bot, and the match records the race as random, since the game tells no
 player which race a computer got (NachOS's sweeps found its `race_actual` never filled). The game does tell a bot the
-computer's difficulty and build, in its game information, which stays as it is, as any bot playing the built-in
-computer sees them; the bot's `--OpponentId` is the computer's name.
+computer's difficulty, in its game information, but not its build (in game, 4.10, found in step 8b), which stays as it
+is, as any bot playing the built-in computer sees it; the bot's `--OpponentId` is the computer's name.
 
 A computer neither crashes nor runs out of time, and has no logs or step time; an `InitializationError` counts only
 for the bot. It is rated in its ladder as a bot is, a row of the standings, and as one player for good: like a bot's
@@ -276,6 +277,10 @@ It also joins the second seat of a bot that plays itself under its name and ` (2
 under one name one player, both controlling player 1 while player 2 stands idle (in game, 4.10, found in step 8a), which
 AI Arena's engine, naming each player for its bot, does not guard against. Each bot is still told the names as the match
 has them.
+
+Against the computer, the game makes the bot player 1, wherever the game's setup lists the computer, so that the
+computer always takes seat 2; and the bot joins without ports, since with the ports a bot on the ladder's command line
+sends, the game waits for a second player and never starts (in game, 4.10, found in step 8b).
 
 The images are AI Arena's, at tags Scala pins: its game image, whose own controller is left unused, and its bot
 environment, `arenaclient-bot-base`. Step 8a tried bots of every type on its v0.8.0 and on aiarena.net's v0.9.0, and all
@@ -436,7 +441,13 @@ Each step ends in something that runs, and is a pull request of its own.
      every case; a .NET bot written for the trial and NachOS's demo bot, on `sc2nachos`, played on both too. AI Arena's
      engine stays the default until 8c, and a runner plays with Scala's by `engine` in its `runner.toml`, as max-9950 is
      to on test-ladder; `runner pull` fetches the images of both, and Scala's adds nothing to download.
-   - 8b: computer opponents, on the server, its pages and the CLI, in the draw and the ratings, and in the engine.
+   - 8b, built: computer opponents, as [above](#computer-opponents): a ladder's owner adds, pauses and removes them on
+     its settings page or by `sc2scala ladder add-computer` and the like, each kept in its ladder, and a match's seat 2
+     holds a bot's version or a computer; the draw seats one for a runner whose engine plays it, which a runner names
+     when it asks for a match and in its log as it starts; a computer is rated in its ladder as a bot is, in its
+     standings and pairs; and `sc2scala play BOT Computer-...` plays one on a machine with no server. On Scala's
+     engine, AI Arena's test bots lost to the computer of a random race, crashed, left and failed to connect as
+     `tools/try_engines.py` expects, and NachOS's demo bot beat the easiest computer of a random race twice.
    - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's machines;
      `runner pull`, the setup script and the guides then fetch only the images Scala's uses, its bot environment moved
      to v0.9.0, as [the engine](#the-engine) says.

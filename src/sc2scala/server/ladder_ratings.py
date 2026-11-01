@@ -1,4 +1,6 @@
-"""A ladder's ratings: which results count and how, refitting them after a result, its standings and pair records."""
+"""A ladder's ratings: which results count and how, refitting them after a result, its standings and pair records.
+
+A ladder's players are its bots' versions and its computers, each rated in one fit of every counted game."""
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,14 +11,24 @@ from sqlalchemy.orm import Session, selectinload
 from sc2scala.result_code import ResultCode
 from sc2scala.server.bradley_terry import fit_ratings
 from sc2scala.server.match_draw import FINISHED
-from sc2scala.server.models import BotVersion, Ladder, LadderEntry, MatchRecord, Rating, utc_now
+from sc2scala.server.models import (
+    BotVersion,
+    ComputerRating,
+    Ladder,
+    LadderComputer,
+    LadderEntry,
+    MatchRecord,
+    Rating,
+    RatingFigures,
+    utc_now,
+)
 
 PRIOR_SD = 100.0
 """The ratings' prior, in Elo points: the width that best predicted AI Arena's 2026 season in the matchmaking
 prototype's data, by `tools/choose_rating_prior.py`."""
 
 DISPLAYED_MEAN = 1500
-"""What the mean rating of every version that played in the ladder is shown as."""
+"""What the mean rating of every player that played in the ladder, version or computer, is shown as."""
 
 INTERVAL_WIDTH = 1.96
 """Standard errors on each side of a rating, for an interval of 95%."""
@@ -42,9 +54,15 @@ def score_of_player_1(code: ResultCode) -> float | None:
     return _SCORE_OF_PLAYER_1.get(code)
 
 
+type PlayerKey = tuple[str, int]
+"""A player of a ladder: `("version", id)` for a bot's version, `("computer", id)` for a computer."""
+_VERSION = "version"
+_COMPUTER = "computer"
+
+
 @dataclass
 class Record:
-    """A version's games, against everyone or one opponent."""
+    """A player's games, against everyone or one opponent."""
 
     wins: int = 0
     losses: int = 0
@@ -57,12 +75,8 @@ class Record:
 
 
 @dataclass(frozen=True)
-class Standing:
-    """An entered bot's place in its ladder, by its latest version's rating; unrated before its first counted game."""
-
-    entry: LadderEntry
-    version: BotVersion
-    rating: Rating | None
+class _RatedPlace:
+    rating: RatingFigures | None
 
     @property
     def displayed_rating(self) -> int | None:
@@ -73,12 +87,39 @@ class Standing:
         return None if self.rating is None else round(INTERVAL_WIDTH * self.rating.standard_error)
 
 
+@dataclass(frozen=True)
+class Standing(_RatedPlace):
+    """An entered bot's place in its ladder, by its latest version's rating; unrated before its first counted game."""
+
+    entry: LadderEntry
+    version: BotVersion
+    is_computer = False
+
+    @property
+    def name(self) -> str:
+        return self.entry.bot.name
+
+
+@dataclass(frozen=True)
+class ComputerStanding(_RatedPlace):
+    """A computer's place in its ladder; unrated before its first counted game."""
+
+    computer: LadderComputer
+    is_computer = True
+
+    @property
+    def name(self) -> str:
+        return self.computer.name
+
+
 @dataclass
 class PairRecords:
-    """The records between the entered bots' latest versions, by their bots' names: `records[(bot, opponent)]` is the
-    bot's record against the opponent."""
+    """The records between the ladder's players, its entered bots' latest versions and its computers, by their names:
+    `records[(player, opponent)]` is the player's record against the opponent. Two computers never play."""
 
-    bots: list[str]
+    players: list[str]
+    computers: set[str] = field(default_factory=set)
+    """The names among `players` that are computers'."""
     records: dict[tuple[str, str], Record] = field(default_factory=dict)
 
 
@@ -93,76 +134,93 @@ def refit_after_result(app: Any, ladder_id: int) -> None:
 
 
 def refit_ratings(session: Session, ladder: Ladder) -> None:
-    """Fits the ratings of every version that played a counted game in `ladder`, and keeps them in place of the last."""
+    """Fits the ratings of every player that played a counted game in `ladder`, and keeps them in place of the last."""
     counted = [(match, score) for match in _finished_matches(session, ladder) if (score := _score(match)) is not None]
-    version_ids = sorted({version_id for match, _ in counted for version_id in _version_ids(match)})
-    index_of = {version_id: index for index, version_id in enumerate(version_ids)}
-    records = {version_id: Record() for version_id in version_ids}
+    players = sorted({player for match, _ in counted for player in _players_of(match)})
+    index_of = {player: index for index, player in enumerate(players)}
+    records = {player: Record() for player in players}
     for match, score in counted:
         _count(records, match, score)
     session.execute(delete(Rating).where(Rating.ladder_id == ladder.id))
-    if not version_ids:
+    session.execute(delete(ComputerRating).where(ComputerRating.ladder_id == ladder.id))
+    if not players:
         return
     fitted = fit_ratings(
-        len(version_ids),
-        [index_of[match.player_1_version_id] for match, _ in counted],
-        [index_of[match.player_2_version_id] for match, _ in counted],
+        len(players),
+        [index_of[_players_of(match)[0]] for match, _ in counted],
+        [index_of[_players_of(match)[1]] for match, _ in counted],
         [score for _, score in counted],
         prior_sd=PRIOR_SD,
     )
     now = utc_now()
-    for version_id, index in index_of.items():
-        record = records[version_id]
-        session.add(
-            Rating(
-                ladder_id=ladder.id,
-                version_id=version_id,
-                rating=float(fitted.ratings[index]),
-                standard_error=float(fitted.standard_errors[index]),
-                games=record.games,
-                wins=record.wins,
-                losses=record.losses,
-                ties=record.ties,
-                crashes=record.crashes,
-                fitted_at=now,
-            )
-        )
+    for (kind, player_id), index in index_of.items():
+        record = records[(kind, player_id)]
+        figures = {
+            "rating": float(fitted.ratings[index]),
+            "standard_error": float(fitted.standard_errors[index]),
+            "games": record.games,
+            "wins": record.wins,
+            "losses": record.losses,
+            "ties": record.ties,
+            "crashes": record.crashes,
+            "fitted_at": now,
+        }
+        if kind == _COMPUTER:
+            session.add(ComputerRating(ladder_id=ladder.id, computer_id=player_id, **figures))
+        else:
+            session.add(Rating(ladder_id=ladder.id, version_id=player_id, **figures))
 
 
-def standings(session: Session, ladder: Ladder) -> list[Standing]:
-    """The ladder's entered bots, the rated by rating, highest first, then the unrated by name."""
+def standings(session: Session, ladder: Ladder) -> list[Standing | ComputerStanding]:
+    """The ladder's entered bots and its computers but the retired, the rated by rating, highest first, then the
+    unrated by name."""
     ratings = {
         rating.version_id: rating for rating in session.scalars(select(Rating).where(Rating.ladder_id == ladder.id))
     }
-    placed = []
+    computer_ratings = {
+        rating.computer_id: rating
+        for rating in session.scalars(select(ComputerRating).where(ComputerRating.ladder_id == ladder.id))
+    }
+    placed: list[Standing | ComputerStanding] = []
     for entry in ladder.entries:
         version = entry.bot.latest_version
         if version is not None:
             placed.append(Standing(entry=entry, version=version, rating=ratings.get(version.id)))
+    for computer in playing_computers(ladder):
+        placed.append(ComputerStanding(computer=computer, rating=computer_ratings.get(computer.id)))
     return sorted(
         placed,
         key=lambda standing: (
             standing.rating is None,
             -(standing.rating.rating if standing.rating else 0),
-            standing.entry.bot.name.lower(),
+            standing.name.lower(),
         ),
     )
 
 
+def playing_computers(ladder: Ladder) -> list[LadderComputer]:
+    """The ladder's computers but the retired, paused or not."""
+    return [computer for computer in ladder.computers if computer.retired_at is None]
+
+
 def pair_records(session: Session, ladder: Ladder) -> PairRecords:
-    """The records between the entered bots' latest versions, in counted games."""
-    latest = {
-        entry.bot.latest_version.id: entry.bot.name for entry in ladder.entries if entry.bot.latest_version is not None
+    """The records between the ladder's players, its entered bots' latest versions and its computers but the retired,
+    in counted games."""
+    names: dict[PlayerKey, str] = {
+        (_VERSION, entry.bot.latest_version.id): entry.bot.name
+        for entry in ladder.entries
+        if entry.bot.latest_version is not None
     }
-    pairs = PairRecords(bots=sorted(latest.values(), key=str.lower))
+    computers = {(_COMPUTER, computer.id): computer.name for computer in playing_computers(ladder)}
+    names |= computers
+    pairs = PairRecords(players=sorted(names.values(), key=str.lower), computers=set(computers.values()))
     for match in _finished_matches(session, ladder):
         score = _score(match)
-        bot_1 = latest.get(match.player_1_version_id)
-        bot_2 = latest.get(match.player_2_version_id)
-        if score is None or bot_1 is None or bot_2 is None:
+        player_1, player_2 = (names.get(player) for player in _players_of(match))
+        if score is None or player_1 is None or player_2 is None:
             continue
-        for bot, opponent, own_score, seat in ((bot_1, bot_2, score, 1), (bot_2, bot_1, 1 - score, 2)):
-            record = pairs.records.setdefault((bot, opponent), Record())
+        for player, opponent, own_score, seat in ((player_1, player_2, score, 1), (player_2, player_1, 1 - score, 2)):
+            record = pairs.records.setdefault((player, opponent), Record())
             _add_game(record, own_score, crashed=ResultCode(match.result) in _CRASHES_OF_PLAYER[seat])
     return pairs
 
@@ -176,14 +234,19 @@ def _score(match: MatchRecord) -> float | None:
     return score_of_player_1(ResultCode(match.result)) if match.result else None
 
 
-def _version_ids(match: MatchRecord) -> tuple[int, int]:
-    return match.player_1_version_id, match.player_2_version_id
+def _players_of(match: MatchRecord) -> tuple[PlayerKey, PlayerKey]:
+    """The match's players, in their seats."""
+    if match.player_2_computer_id is not None:
+        return (_VERSION, match.player_1_version_id), (_COMPUTER, match.player_2_computer_id)
+    assert match.player_2_version_id is not None
+    return (_VERSION, match.player_1_version_id), (_VERSION, match.player_2_version_id)
 
 
-def _count(records: dict[int, Record], match: MatchRecord, score: float) -> None:
+def _count(records: dict[PlayerKey, Record], match: MatchRecord, score: float) -> None:
     code = ResultCode(match.result)
-    _add_game(records[match.player_1_version_id], score, crashed=code in _CRASHES_OF_PLAYER[1])
-    _add_game(records[match.player_2_version_id], 1 - score, crashed=code in _CRASHES_OF_PLAYER[2])
+    player_1, player_2 = _players_of(match)
+    _add_game(records[player_1], score, crashed=code in _CRASHES_OF_PLAYER[1])
+    _add_game(records[player_2], 1 - score, crashed=code in _CRASHES_OF_PLAYER[2])
 
 
 def _add_game(record: Record, score: float, *, crashed: bool) -> None:

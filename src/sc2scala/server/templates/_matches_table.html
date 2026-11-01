@@ -7,7 +7,7 @@
         <tr>
           <td class="number"><a href="/matches/{{ match.id }}">{{ match.id }}</a></td>
           <td>
-            {% for player in match.players %}<a href="/bots/{{ player.bot }}">{{ player.bot }}</a> <span class="muted">v{{ player.version }}</span>{% if not loop.last %} vs {% endif %}{% endfor %}
+            {% for player in match.players %}{% if player.computer %}{{ player.computer }}{% else %}<a href="/bots/{{ player.bot }}">{{ player.bot }}</a> <span class="muted">v{{ player.version }}</span>{% endif %}{% if not loop.last %} vs {% endif %}{% endfor %}
           </td>
           <td>{{ match.map }}</td>
           <td class="outcome outcome-{{ match.status }}">{{ match.outcome }}</td>

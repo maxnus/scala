@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from sc2scala.computer import Build, Difficulty
 from sc2scala.errors import ScalaError, ServerError
 from sc2scala.removal_commands import confirm_at_terminal, removal_line
 from sc2scala.scala_client import ScalaClient
@@ -57,6 +58,33 @@ def add_ladder_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
         entry = commands.add_parser(subcommand, help=help_text)
         entry.add_argument("name", help="the ladder")
         entry.add_argument("bot")
+    add_computer = commands.add_parser(
+        "add-computer",
+        help="add the game's built-in computer to your ladder",
+        description="Adds the game's built-in computer to your ladder, which then plays its bots, never another "
+        "computer, and is rated as a bot is; only runners on Scala's engine play it. A random race or build is the "
+        "game's own pick, which the bot is not told. Added again after it was removed, it keeps its record.",
+    )
+    add_computer.add_argument("name", help="the ladder")
+    add_computer.add_argument("--race", required=True, help="T, Z, P or R, or its name")
+    add_computer.add_argument(
+        "--difficulty", required=True, type=_difficulty_from_text, help=", ".join(Difficulty), metavar="DIFFICULTY"
+    )
+    add_computer.add_argument(
+        "--build",
+        type=_build_from_text,
+        default=Build.RANDOM,
+        metavar="BUILD",
+        help=f"{', '.join(Build)} (default: {Build.RANDOM}, the game's own pick)",
+    )
+    for subcommand, help_text in [
+        ("remove-computer", "delete a computer from your ladder, or retire it if it played there"),
+        ("pause-computer", "pause a computer in your ladder"),
+        ("resume-computer", "let a paused computer play again"),
+    ]:
+        computer = commands.add_parser(subcommand, help=help_text)
+        computer.add_argument("name", help="the ladder")
+        computer.add_argument("computer", help="its name, as Computer-VeryHard-Zerg-Rush")
     add_map = commands.add_parser("add-map", help="add a map to your ladder")
     add_map.add_argument("name")
     add_map.add_argument("map_file", type=Path, metavar="MAP", help="an .SC2Map file")
@@ -126,6 +154,18 @@ def run_ladder_command(args: argparse.Namespace, *, http: httpx.Client | None) -
             print(_description_of(client.pause_entry(args.name, args.bot)))
         case "resume":
             print(_description_of(client.resume_entry(args.name, args.bot)))
+        case "add-computer":
+            added = client.add_computer(
+                args.name, race=args.race, difficulty=args.difficulty.value, build=args.build.value
+            )
+            print(_description_of(added))
+        case "remove-computer":
+            removed = client.remove_computer(args.name, args.computer)
+            print(removal_line(removed, drawn="played", stays="it is drawn no more, and keeps its matches and record"))
+        case "pause-computer":
+            print(_description_of(client.pause_computer(args.name, args.computer)))
+        case "resume-computer":
+            print(_description_of(client.resume_computer(args.name, args.computer)))
         case "add-map":
             print(_description_of(client.add_map(args.name, args.map_file)))
         case "remove-map":
@@ -171,6 +211,20 @@ def _limit_from_text(text: str) -> tuple[str, str]:
     return name.strip(), value.strip()
 
 
+def _difficulty_from_text(text: str) -> Difficulty:
+    try:
+        return Difficulty.from_text(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def _build_from_text(text: str) -> Build:
+    try:
+        return Build.from_text(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 def _runner_from_text(text: str) -> str:
     owner, separator, machine = text.partition("/")
     if not separator or not owner or not machine or "/" in machine:
@@ -201,12 +255,18 @@ def _summary_line(ladder: dict[str, Any]) -> str:
     if "bots" not in ladder:
         return f"{ladder['name']}: {access}, by {ladder['owner']}"
     member = ", you are a member" if ladder["protected"] and ladder["member"] else ""
-    return f"{ladder['name']}: {access}, by {ladder['owner']}, {ladder['bots']} bots on {ladder['maps']} maps{member}"
+    count = ladder.get("computers", 0)
+    computers = f" and {count} {'computer' if count == 1 else 'computers'}" if count else ""
+    players = f"{ladder['bots']} bots{computers}"
+    return f"{ladder['name']}: {access}, by {ladder['owner']}, {players} on {ladder['maps']} maps{member}"
 
 
 def _description_of(ladder: dict[str, Any]) -> str:
+    computers = ladder.get("computers", [])
     lines = [
-        _summary_line({**ladder, "bots": len(ladder["entries"]), "maps": len(ladder["maps"])}),
+        _summary_line(
+            {**ladder, "bots": len(ladder["entries"]), "computers": len(computers), "maps": len(ladder["maps"])}
+        ),
         "Maps: " + ", ".join(map_file["name"] for map_file in ladder["maps"]),
         "Limits: "
         + ", ".join(
@@ -217,11 +277,16 @@ def _description_of(ladder: dict[str, Any]) -> str:
     for entry in ladder["entries"]:
         paused = f", paused: {entry['paused_because']}" if entry["paused"] else ""
         lines.append(f"  {entry['bot']}, by {entry['author']}, version {entry['version']}{paused}")
+    for computer in computers:
+        lines.append(f"  {computer['computer']}, the game's{', paused' if computer['paused'] else ''}")
     return "\n".join(lines)
 
 
 def _match_line(played: dict[str, Any]) -> str:
-    players = " vs ".join(f"{player['bot']} ({player['race']}, v{player['version']})" for player in played["players"])
+    players = " vs ".join(
+        player["computer"] if "computer" in player else f"{player['bot']} ({player['race']}, v{player['version']})"
+        for player in played["players"]
+    )
     if played["status"] == "void":
         outcome = f"void, {played['result']} reported" if played["result"] else "void"
     else:
@@ -248,6 +313,8 @@ def _standing_line(place: int, standing: dict[str, Any]) -> str:
     rating = f"{standing['rating']} ± {standing['interval']}" if standing["rating"] is not None else "unrated"
     record = f"{standing['wins']}-{standing['losses']}-{standing['ties']}"
     paused = ", paused" if standing["paused"] else ""
+    if "computer" in standing:
+        return f"{place:>3}. {standing['computer']}: {rating}, {standing['games']} games, {record}{paused}"
     return (
         f"{place:>3}. {standing['bot']} ({standing['race']}, v{standing['version']}, by {standing['author']}): "
         f"{rating}, {standing['games']} games, {record}, {standing['crashes']} crashes{paused}"

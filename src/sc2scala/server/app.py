@@ -22,6 +22,7 @@ from sc2scala.server import (
     api_routes,
     bot_forms,
     bots_api,
+    computers_api,
     ladder_forms,
     ladder_runners_api,
     ladders_api,
@@ -109,6 +110,7 @@ def create_app(
     app.include_router(api_routes.router)
     app.include_router(bots_api.router)
     app.include_router(ladders_api.router)
+    app.include_router(computers_api.router)
     app.include_router(ladder_runners_api.router)
     app.include_router(runners_api.router)
     app.include_router(runner_setup.router)

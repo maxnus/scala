@@ -24,9 +24,11 @@ from sc2scala.compose_matches import (
     refuse_windows_bots,
     remove_work_folder,
 )
+from sc2scala.computer import Computer
+from sc2scala.engine_names import SCALA_ENGINE
 from sc2scala.errors import EngineError
 from sc2scala.match import Match
-from sc2scala.match_controller.controller_config import ControllerConfig, SeatConfig
+from sc2scala.match_controller.controller_config import ComputerConfig, ControllerConfig, SeatConfig
 from sc2scala.match_result import MatchResult
 from sc2scala.result_code import ResultCode
 
@@ -42,8 +44,9 @@ _GAME_FOLDER = "/root/StarCraftII"
 _GAME_API_PORTS = (5001, 5002)
 _BOT_PORTS = (8081, 8082)
 """The ports the match controller listens on for each seat's bot, given to the bot as AI Arena gives them."""
-_NETWORKS = ("player_1", "player_2", "game")
-"""The match's networks: each bot's, which it shares with the match controller alone, and the game's."""
+_BOT_NETWORKS = ("player_1", "player_2")
+"""Each bot's network, which it shares with the match controller alone."""
+_GAME_NETWORK = "game"
 _CONTROLLER_PACKAGES = ("websockets", "s2clientprotocol", "google.protobuf", "google._upb")
 """What the match controller imports beside the standard library, copied beside it; `google._upb` is protobuf's
 compiled part, which an install of protobuf in pure Python lacks."""
@@ -58,13 +61,15 @@ class ScalaEngine:
     It plays a match as `AiArenaEngine` does, each in a Compose project of its own, and each bot sandboxed as
     `docs/sandbox.md` says, and leaves the same: the replay, and `logs`, with each bot's in `player_1-<name>` and
     `player_2-<name>`, `game`, the game clients' output, `match_controller`, and `compose.log`, what Docker Compose
-    wrote. With `keep_work_folder`, the work folder stays. Under rootless Docker, which `rootless` says or Docker is
-    asked about at the first match, the containers run as their root, which is the user who started Docker; otherwise
-    as the user of this process.
+    wrote. Against the built-in computer, the game has one client and one bot. With `keep_work_folder`, the work folder
+    stays. Under rootless Docker, which `rootless` says or Docker is asked about at the first match, the containers run
+    as their root, which is the user who started Docker; otherwise as the user of this process.
 
     The match controller runs from copies of its package and of the packages it imports, taken from this process's,
     and mounted read-only: nothing else of this machine's reaches its container, which every bot reaches.
     """
+
+    name = SCALA_ENGINE
 
     def __init__(
         self,
@@ -119,14 +124,15 @@ class ScalaEngine:
         self._lay_out_work_folder(match, work_folder=work_folder, user=container_user(self.rootless))
 
         logger.info(f"Playing {match.player_1.name} against {match.player_2.name} on {match.map_name}")
+        seats = range(len(match.bots))
         try:
             real_time_seconds, seat_over_log_limit = self._compose.play_in_containers(
                 match,
                 work_folder=work_folder,
                 compose_log=compose_log,
                 controller_service=_CONTROLLER_SERVICE,
-                bot_services=_BOT_SERVICES,
-                bot_log_folders=(work_folder / "logs" / "player_1", work_folder / "logs" / "player_2"),
+                bot_services=tuple(_BOT_SERVICES[index] for index in seats),
+                bot_log_folders=tuple(work_folder / "logs" / _BOT_NETWORKS[index] for index in seats),
             )
             replay_file = move_replay(work_folder / "output", output_folder)
             _move_logs(match, work_folder=work_folder, logs_folder=logs_folder)
@@ -160,9 +166,10 @@ class ScalaEngine:
     def _lay_out_work_folder(self, match: Match, *, work_folder: Path, user: str | None) -> None:
         """Writes what the match's containers read into `work_folder`, with the Compose file."""
         work_folder.mkdir()
-        for seat, bot in enumerate((match.player_1, match.player_2), start=1):
+        for seat, bot in enumerate(match.bots, start=1):
             copy_bot(bot, work_folder / "bots" / str(seat) / bot.name)
-        for logs in ("player_1", "player_2", "game", _CONTROLLER_SERVICE):
+            (work_folder / "logs" / f"player_{seat}").mkdir(parents=True)
+        for logs in ("game", _CONTROLLER_SERVICE):
             (work_folder / "logs" / logs).mkdir(parents=True)
         (work_folder / "maps").mkdir()
         shutil.copyfile(match.map_file, work_folder / "maps" / match.map_file.name)
@@ -204,9 +211,11 @@ def _controller_config(match: Match) -> ControllerConfig:
         )
 
     limits = match.limits
+    computer = match.computer
     return ControllerConfig(
         map_path=f"{_GAME_FOLDER}/maps/{match.map_file.name}",
-        seats=(seat(0, match.player_1), seat(1, match.player_2)),
+        seats=(seat(0, match.player_1),) if computer else (seat(0, match.player_1), seat(1, match.bots[1])),
+        computer=_computer_config(computer) if computer else None,
         replay_file=f"{_REPLAY_FOLDER_IN_CONTAINER}/{match.player_1.name}-vs-{match.player_2.name}.SC2Replay",
         result_file=f"{_REPLAY_FOLDER_IN_CONTAINER}/result.json",
         max_game_steps=limits.max_game_steps,
@@ -216,15 +225,23 @@ def _controller_config(match: Match) -> ControllerConfig:
     )
 
 
-def _game_script() -> str:
-    """What the game's container runs: a game client for each seat, listening for the match controller, which alone
-    reaches the game's network, each client's output in its log."""
-    clients = [
+def _computer_config(computer: Computer) -> ComputerConfig:
+    return ComputerConfig(
+        name=computer.name, race=computer.race.value, difficulty=computer.difficulty.value, build=computer.build.value
+    )
+
+
+def _game_script(clients: int) -> str:
+    """What the game's container runs: `clients` game clients, one for each bot's seat, listening for the match
+    controller, which alone reaches the game's network, each client's output in its log."""
+    commands = [
         f'mkdir -p /tmp/client-{seat} && "$client" -listen 0.0.0.0 -port {port} -dataDir {_GAME_FOLDER} '
         f"-displayMode 0 -tempDir /tmp/client-{seat} >/logs/client-{seat}.log 2>&1 &"
-        for seat, port in enumerate(_GAME_API_PORTS, start=1)
+        for seat, port in enumerate(_GAME_API_PORTS[:clients], start=1)
     ]
-    return "\n".join([f"client=$(ls -d {_GAME_FOLDER}/Versions/Base*/SC2_x64 | sort -V | tail -n 1)", *clients, "wait"])
+    return "\n".join(
+        [f"client=$(ls -d {_GAME_FOLDER}/Versions/Base*/SC2_x64 | sort -V | tail -n 1)", *commands, "wait"]
+    )
 
 
 def _bot_command(bot: Bot) -> list[str]:
@@ -244,11 +261,12 @@ def _bot_command(bot: Bot) -> list[str]:
             raise EngineError(f"{bot.name} is a Windows bot, and the engine's images hold no Wine to run it")
 
 
-def _bot_script(bot: Bot, *, opponent: Bot, port: int) -> str:
+def _bot_script(bot: Bot, *, opponent_name: str, port: int) -> str:
     """What a bot's container runs: the bot, once the match controller listens, with the arguments AI Arena gives it,
-    `--LadderServer` the controller's address, and its output in its log."""
+    `--LadderServer` the controller's address and `--OpponentId` the opponent's name, a bot's or the computer's, and
+    its output in its log."""
     before_address = shlex.join([*_bot_command(bot), "--GamePort", str(port), "--LadderServer"])
-    after_address = shlex.join(["--StartPort", str(port), "--OpponentId", opponent.name])
+    after_address = shlex.join(["--StartPort", str(port), "--OpponentId", opponent_name])
     return "\n".join(
         [
             f"until controller=$(getent hosts {_CONTROLLER_SERVICE} | cut -d ' ' -f 1) && [ -n \"$controller\" ] "
@@ -266,16 +284,18 @@ def _compose_project(
     Every container runs as `user`, if given, with no capabilities and no way to gain privileges, and under an init
     that passes signals on. Each bot sees its own copy alone, read-only but for its `data` folder and `/tmp`, which are
     held in memory, and reaches the match controller alone, on a network of its own. The game reaches it on another,
-    and no network reaches beyond the match.
+    and no network reaches beyond the match. Against the computer, the game runs one client, and there is one bot.
     """
     resource_limits = match.resource_limits
     unprivileged: dict[str, Any] = {**UNPRIVILEGED_OPTIONS, "init": True}
     if user is not None:
         unprivileged["user"] = user
-    bots = (match.player_1, match.player_2)
+    bots = match.bots
+    networks = [*_BOT_NETWORKS[: len(bots)], _GAME_NETWORK]
 
     def bot_service(index: int) -> dict[str, Any]:
         bot = bots[index]
+        opponent_name = match.player_2.name if index == 0 else match.player_1.name
         memory = f"{resource_limits.bot_memory_mib}m"
         return {
             "image": bot_image,
@@ -283,7 +303,7 @@ def _compose_project(
             "entrypoint": [
                 "bash",
                 "-c",
-                _for_compose(_bot_script(bot, opponent=bots[1 - index], port=_BOT_PORTS[index])),
+                _for_compose(_bot_script(bot, opponent_name=opponent_name, port=_BOT_PORTS[index])),
             ],
             "working_dir": f"/bots/{bot.name}",
             "environment": ["HOME=/tmp"],
@@ -294,7 +314,7 @@ def _compose_project(
             "memswap_limit": memory,
             "cpus": resource_limits.bot_cpus,
             "pids_limit": resource_limits.bot_processes,
-            "networks": [_NETWORKS[index]],
+            "networks": [_BOT_NETWORKS[index]],
             "depends_on": [_CONTROLLER_SERVICE],
         }
 
@@ -305,16 +325,15 @@ def _compose_project(
             _GAME_SERVICE: {
                 "image": game_image,
                 **unprivileged,
-                "entrypoint": ["bash", "-c", _for_compose(_game_script())],
+                "entrypoint": ["bash", "-c", _for_compose(_game_script(len(bots)))],
                 "environment": ["HOME=/root"],
                 "volumes": [f"{work_folder}/maps:{_GAME_FOLDER}/maps:ro", f"{work_folder}/logs/game:/logs"],
                 "mem_limit": game_memory,
                 "memswap_limit": game_memory,
                 "cpus": resource_limits.game_cpus,
-                "networks": [_NETWORKS[2]],
+                "networks": [_GAME_NETWORK],
             },
-            _BOT_SERVICES[0]: bot_service(0),
-            _BOT_SERVICES[1]: bot_service(1),
+            **{_BOT_SERVICES[index]: bot_service(index) for index in range(len(bots))},
             _CONTROLLER_SERVICE: {
                 "image": bot_image,
                 **unprivileged,
@@ -331,10 +350,10 @@ def _compose_project(
                 "mem_limit": controller_memory,
                 "memswap_limit": controller_memory,
                 "cpus": resource_limits.match_controller_cpus,
-                "networks": list(_NETWORKS),
+                "networks": networks,
             },
         },
-        "networks": {network: {"internal": True} for network in _NETWORKS},
+        "networks": {network: {"internal": True} for network in networks},
     }
 
 
@@ -358,7 +377,7 @@ def _read_controller_result(result_file: Path, logs_folder: Path) -> dict[str, A
 
 def _move_logs(match: Match, *, work_folder: Path, logs_folder: Path) -> None:
     """Moves the logs into `logs_folder`, each bot's as `player_<seat>-<name>`."""
-    for seat, bot in enumerate((match.player_1, match.player_2), start=1):
+    for seat, bot in enumerate(match.bots, start=1):
         shutil.move(work_folder / "logs" / f"player_{seat}", logs_folder / f"player_{seat}-{bot.name}")
     for logs in ("game", _CONTROLLER_SERVICE):
         shutil.move(work_folder / "logs" / logs, logs_folder / logs)

@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from sc2scala import (
     ResourceLimits,
     ResultCode,
 )
+from sc2scala.computer import Computer, Difficulty
 from tests.bot_folders import make_map, make_python_bot
 
 _RESULT_OF_A_WIN = {"match": 1, "type": "Player1Win", "game_steps": 4480, "bot1_avg_step_time": 0.002}
@@ -259,6 +261,15 @@ def test_a_bot_playing_itself_is_refused(tmp_path: Path, match: Match) -> None:
     docker = FakeDocker(engine_result=_RESULT_OF_A_WIN)
     with pytest.raises(EngineError, match="against itself"):
         engine_with(docker).play(mirror, output_folder=tmp_path / "out")
+    assert docker.commands == []
+
+
+def test_the_computer_is_refused(tmp_path: Path, match: Match) -> None:
+    docker = FakeDocker(engine_result=_RESULT_OF_A_WIN)
+    with pytest.raises(EngineError, match="cannot seat the computer, Computer-Easy-Random-RandomBuild"):
+        engine_with(docker).play(
+            replace(match, player_2=Computer(Race.RANDOM, Difficulty.EASY)), output_folder=tmp_path
+        )
     assert docker.commands == []
 
 

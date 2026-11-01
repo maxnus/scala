@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from sc2scala.server.file_store import FileStore
-from sc2scala.server.ladders_api import visible_ladder
+from sc2scala.server.ladders_api import computer_player, visible_ladder
 from sc2scala.server.models import MatchRecord, User
 from sc2scala.server.runner_api import LOGS, LOGS_SUFFIX, REPLAY_SUFFIX, REPLAYS
 from sc2scala.server.web import DatabaseSession, token_user
@@ -57,17 +57,19 @@ def replay_of(request: Request, session: Session, user: User | None, match_id: i
     return FileResponse(
         file_store.path_of(REPLAYS, seen.replay_sha256, REPLAY_SUFFIX),
         media_type="application/octet-stream",
-        filename=f"{match_id}_{seen.player_1_version.bot.name}_vs_{seen.player_2_version.bot.name}{REPLAY_SUFFIX}",
+        filename=f"{match_id}_{'_vs_'.join(seen.player_names)}{REPLAY_SUFFIX}",
     )
 
 
 def logs_of(request: Request, session: Session, user: User | None, match_id: int, part: str) -> FileResponse:
     """A bot's logs, `1` or `2` by its seat, for the bot's author alone, or the engine's, `engine`, for the ladder's
-    owner and the runner machine's."""
+    owner and the runner machine's; the computer has none."""
     seen = visible_match(session, user, match_id)
     if part in ("1", "2"):
+        if int(part) > len(seen.bot_versions):
+            raise HTTPException(404, f"{seen.player_2_name} is the computer, which has no logs")
         if not may_read_bot_logs(seen, user, seat=int(part)):
-            bot = seen.versions[int(part) - 1].bot
+            bot = seen.bot_versions[int(part) - 1].bot
             raise HTTPException(403, f"{bot.name}'s logs are for {bot.owner.login} alone")
         sha256 = seen.player_1_logs_sha256 if part == "1" else seen.player_2_logs_sha256
     elif part == "engine":
@@ -85,7 +87,9 @@ def logs_of(request: Request, session: Session, user: User | None, match_id: int
 
 
 def may_read_bot_logs(record: MatchRecord, user: User | None, *, seat: int) -> bool:
-    return user is not None and record.versions[seat - 1].bot.owner_id == user.id
+    """Whether `user` may read the logs of the bot in `seat`: its author alone, and nobody the computer's."""
+    versions = record.bot_versions
+    return user is not None and seat <= len(versions) and versions[seat - 1].bot.owner_id == user.id
 
 
 def may_read_engine_logs(record: MatchRecord, user: User | None) -> bool:
@@ -94,16 +98,20 @@ def may_read_engine_logs(record: MatchRecord, user: User | None) -> bool:
 
 
 def match_summary(record: MatchRecord) -> dict[str, Any]:
+    """The match, each of its players a bot's version, or in seat 2 the computer."""
     races = (record.player_1_race, record.player_2_race)
+    players: list[dict[str, Any]] = [
+        {"bot": version.bot.name, "author": version.bot.owner.login, "version": version.number, "race": race}
+        for version, race in zip(record.bot_versions, races, strict=False)
+    ]
+    if record.player_2_computer is not None:
+        players.append(computer_player(record.player_2_computer))
     return {
         "id": record.id,
         "ladder": record.ladder.name,
         "status": record.status,
         "map": record.map_file.name,
-        "players": [
-            {"bot": version.bot.name, "author": version.bot.owner.login, "version": version.number, "race": race}
-            for version, race in zip(record.versions, races, strict=True)
-        ],
+        "players": players,
         "result": record.result,
         "game_steps": record.game_steps,
         "drawn_at": record.drawn_at.isoformat(),

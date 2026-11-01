@@ -8,8 +8,10 @@ and prints what each engine decided beside what was expected, with the game's ti
 The test bots are AI Arena's own, of its repository aiarena-test-bots: Python bots on its copy of python-sc2 for each
 way a match can end, and a bot each of Java, Node.js and a Linux binary, in Rust. Each plays the one that only mines,
 `loser_bot`; the Java and Node.js bots do not attack either, and the game itself calls a tie after 22 minutes of game
-time. A case takes from 10 to 50 seconds. A Windows bot, which neither engine plays, and a .NET bot, which AI Arena's
-test bots lack, are left out.
+time. The cases named `computer-` play the game's built-in computer instead, which Scala's engine alone plays; none of
+them wins, since every bot here that attacks rushes with its workers, which wins against the easiest computer only
+sometimes. A case takes from 10 to 50 seconds. A Windows bot, which neither engine plays, and a .NET bot, which AI
+Arena's test bots lack, are left out.
 """
 
 import argparse
@@ -19,7 +21,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from sc2scala.engine_choice import ENGINE_NAMES
+from sc2scala.computer import is_computer_name
+from sc2scala.engine_names import ENGINE_NAMES, ENGINES_PLAYING_COMPUTERS
 
 _REPOSITORY = Path(__file__).resolve().parent.parent
 _OPPONENT = "loser_bot"
@@ -27,12 +30,17 @@ _OPPONENT = "loser_bot"
 
 @dataclass(frozen=True)
 class TrialCase:
-    """A match of `bot`, playing `race`, against the bot that only mines, and the result it should have."""
+    """A match of `bot`, playing `race`, against `opponent`, by default the bot that only mines, or the computer of the
+    name given, and the result it should have."""
 
     name: str
     bot: str
     race: str
     expected: str
+    opponent: str = _OPPONENT
+
+    def plays_on(self, engine: str) -> bool:
+        return engine in ENGINES_PLAYING_COMPUTERS or not is_computer_name(self.opponent)
 
 
 CASES = (
@@ -46,6 +54,12 @@ CASES = (
     TrialCase("leaver", "leaver_bot", "T", "Player2Win"),
     TrialCase("never-connects", "connect_timeout_bot", "T", "InitializationError"),
     TrialCase("tie", "tie_bot", "T", "Tie"),
+    TrialCase("computer-loss", "loser_bot", "T", "Player2Win", "Computer-VeryHard-Random-RandomBuild"),
+    TrialCase("computer-crash", "crash_bot", "T", "Player1Crash", "Computer-VeryEasy-Protoss-Macro"),
+    TrialCase("computer-leaver", "leaver_bot", "T", "Player2Win", "Computer-VeryEasy-Terran-Air"),
+    TrialCase(
+        "computer-never-connects", "connect_timeout_bot", "T", "InitializationError", "Computer-Easy-Zerg-Timing"
+    ),
 )
 
 
@@ -63,7 +77,7 @@ def main() -> None:
     for case in CASES:
         if args.cases and case.name not in args.cases:
             continue
-        for engine in args.engines:
+        for engine in [engine for engine in args.engines if case.plays_on(engine)]:
             row = _played(case, engine, test_bots=args.test_bots, map_file=args.map_file, output=args.output)
             rows.append(row)
             print(json.dumps(row), flush=True)
@@ -78,7 +92,7 @@ def _played(case: TrialCase, engine: str, *, test_bots: Path, map_file: Path, ou
     match_folder = output / engine / case.name
     started = time.monotonic()
     command = [
-        *("uv", "run", "sc2scala", "play", str(test_bots / case.bot), str(test_bots / _OPPONENT)),
+        *("uv", "run", "sc2scala", "play", str(test_bots / case.bot), _opponent_argument(case, test_bots)),
         *("--map", str(map_file), "--races", case.race, "T", "--engine", engine, "--output", str(match_folder)),
     ]
     finished = subprocess.run(command, cwd=_REPOSITORY, capture_output=True, text=True, check=False)
@@ -97,6 +111,10 @@ def _played(case: TrialCase, engine: str, *, test_bots: Path, map_file: Path, ou
         "step_ms": [None if step_time is None else round(step_time * 1000, 3) for step_time in step_times],
         "replay": result["replay"] is not None,
     }
+
+
+def _opponent_argument(case: TrialCase, test_bots: Path) -> str:
+    return case.opponent if is_computer_name(case.opponent) else str(test_bots / case.opponent)
 
 
 if __name__ == "__main__":

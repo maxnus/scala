@@ -10,7 +10,7 @@ class MatchEngine(Protocol):
 
     @property
     def name(self) -> str:
-        """The engine's name, one of `engine_choice.ENGINE_NAMES`, which a runner tells the server, so that it draws
+        """The engine's name, one of `engine_names.ENGINE_NAMES`, which a runner tells the server, so that it draws
         only matches the engine plays."""
         ...
 

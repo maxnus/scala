@@ -25,6 +25,7 @@ from sc2scala.compose_matches import (
     remove_work_folder,
 )
 from sc2scala.computer import Computer
+from sc2scala.engine_names import SCALA_ENGINE
 from sc2scala.errors import EngineError
 from sc2scala.match import Match
 from sc2scala.match_controller.controller_config import ComputerConfig, ControllerConfig, SeatConfig
@@ -68,7 +69,7 @@ class ScalaEngine:
     and mounted read-only: nothing else of this machine's reaches its container, which every bot reaches.
     """
 
-    name = "scala"
+    name = SCALA_ENGINE
 
     def __init__(
         self,

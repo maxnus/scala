@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.orm import Session
 
 from sc2scala.computer import Build, Difficulty
 from sc2scala.errors import UploadRefusedError
@@ -280,15 +281,14 @@ def remove_computer(
     except HTTPException as error:
         return redirect_with_notice(request, settings, refusal_reason(error), refused=True)
     if removal.retired:
-        return redirect_with_notice(
-            request, settings, f"Retired {removal.name}, which keeps its {removal.matches} matches here"
-        )
+        matches = f"{removal.matches} {'match' if removal.matches == 1 else 'matches'}"
+        return redirect_with_notice(request, settings, f"Retired {removal.name}, which keeps its {matches} here")
     return redirect_with_notice(request, settings, f"Deleted {removal.name}")
 
 
 def _paused_computer(
     request: Request,
-    session: DatabaseSession,
+    session: Session,
     user: User,
     name: str,
     computer_name: str,

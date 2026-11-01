@@ -2,15 +2,10 @@
 step 8c of `docs/plan.md` says, or Scala's, by `engine` in `runner.toml` or `sc2scala play --engine`."""
 
 from sc2scala.aiarena_engine import AiArenaEngine
+from sc2scala.engine_names import AIARENA_ENGINE, ENGINE_NAMES, SCALA_ENGINE
 from sc2scala.scala_engine import ScalaEngine
 
-AIARENA_ENGINE = AiArenaEngine.name
-SCALA_ENGINE = ScalaEngine.name
-ENGINE_NAMES = (AIARENA_ENGINE, SCALA_ENGINE)
 DEFAULT_ENGINE = AIARENA_ENGINE
-ENGINE_TITLES = {AIARENA_ENGINE: "AI Arena's engine", SCALA_ENGINE: "Scala's engine"}
-ENGINES_PLAYING_COMPUTERS = frozenset({SCALA_ENGINE})
-"""The engines that seat the game's built-in computer, for which alone the server draws a match with one."""
 
 
 def engine_named(name: str) -> AiArenaEngine | ScalaEngine:

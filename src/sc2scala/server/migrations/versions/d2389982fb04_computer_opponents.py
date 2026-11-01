@@ -74,12 +74,17 @@ def upgrade() -> None:
             ["id"],
             ondelete="CASCADE",
         )
+        batch_op.create_check_constraint(
+            batch_op.f("ck_matches_one_player_in_seat_2"),
+            "(player_2_version_id IS NULL) != (player_2_computer_id IS NULL)",
+        )
 
 
 def downgrade() -> None:
     # A match against a computer has no version in seat 2, which every match needs again.
     op.execute("DELETE FROM matches WHERE player_2_computer_id IS NOT NULL")
     with op.batch_alter_table("matches", schema=None) as batch_op:
+        batch_op.drop_constraint(batch_op.f("ck_matches_one_player_in_seat_2"), type_="check")
         batch_op.drop_constraint(batch_op.f("fk_matches_player_2_computer_id_ladder_computers"), type_="foreignkey")
         batch_op.drop_index(batch_op.f("ix_matches_player_2_computer_id"))
         batch_op.alter_column("player_2_version_id", existing_type=sa.INTEGER(), nullable=False)

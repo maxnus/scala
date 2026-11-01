@@ -15,6 +15,7 @@ from sc2scala.server.ladder_ratings import (
     INTERVAL_WIDTH,
     PRIOR_SD,
     pair_records,
+    playing_computers,
     rating_of_latest_version,
     standings,
 )
@@ -52,7 +53,12 @@ def ladders_page(request: Request, session: DatabaseSession, user: SignedInUser)
     ladders = session.scalars(
         select(Ladder)
         .where(Ladder.retired_at.is_(None))
-        .options(selectinload(Ladder.owner), selectinload(Ladder.entries), selectinload(Ladder.members))
+        .options(
+            selectinload(Ladder.owner),
+            selectinload(Ladder.entries),
+            selectinload(Ladder.computers),
+            selectinload(Ladder.members),
+        )
         .order_by(Ladder.name)
     )
     shown = [
@@ -62,6 +68,7 @@ def ladders_page(request: Request, session: DatabaseSession, user: SignedInUser)
             "protected": ladder.is_protected,
             "visible": not ladder.is_protected or is_member(ladder, user),
             "bots": len(ladder.entries),
+            "computers": len(playing_computers(ladder)),
         }
         for ladder in ladders
     ]

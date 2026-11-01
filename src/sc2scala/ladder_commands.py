@@ -255,7 +255,8 @@ def _summary_line(ladder: dict[str, Any]) -> str:
     if "bots" not in ladder:
         return f"{ladder['name']}: {access}, by {ladder['owner']}"
     member = ", you are a member" if ladder["protected"] and ladder["member"] else ""
-    computers = f" and {ladder['computers']} computers" if ladder.get("computers") else ""
+    count = ladder.get("computers", 0)
+    computers = f" and {count} {'computer' if count == 1 else 'computers'}" if count else ""
     players = f"{ladder['bots']} bots{computers}"
     return f"{ladder['name']}: {access}, by {ladder['owner']}, {players} on {ladder['maps']} maps{member}"
 

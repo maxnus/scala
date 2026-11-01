@@ -3,7 +3,18 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, MetaData, String, Table, TypeDecorator, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    MetaData,
+    String,
+    Table,
+    TypeDecorator,
+    UniqueConstraint,
+)
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -330,10 +341,13 @@ class MatchRecord(Base):
     """A match drawn for a runner: leased to it until `deadline`, then finished with its result, or void.
 
     Each seat holds the bot's version and the race it played, but seat 2 holds the computer instead in a match against
-    it; the files a runner uploaded are kept by their SHA-256.
+    it, and never both; the files a runner uploaded are kept by their SHA-256.
     """
 
     __tablename__ = "matches"
+    __table_args__ = (
+        CheckConstraint("(player_2_version_id IS NULL) != (player_2_computer_id IS NULL)", name="one_player_in_seat_2"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ladder_id: Mapped[int] = mapped_column(ForeignKey("ladders.id", ondelete="CASCADE"), index=True)

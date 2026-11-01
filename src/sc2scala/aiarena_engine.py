@@ -20,6 +20,7 @@ from sc2scala.compose_matches import (
     refuse_windows_bots,
     remove_work_folder,
 )
+from sc2scala.engine_names import AIARENA_ENGINE
 from sc2scala.errors import EngineError
 from sc2scala.game_limits import GameLimits
 from sc2scala.match import Match
@@ -52,7 +53,7 @@ class AiArenaEngine:
     One engine plays matches from several threads at once, and `stop_matches` stops them all.
     """
 
-    name = "aiarena"
+    name = AIARENA_ENGINE
 
     def __init__(
         self,

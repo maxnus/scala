@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from sc2scala.engine_choice import ENGINES_PLAYING_COMPUTERS
+from sc2scala.engine_names import ENGINES_PLAYING_COMPUTERS
 from sc2scala.errors import UploadRefusedError
 from sc2scala.game_limits import GameLimits
 from sc2scala.resource_limits import ResourceLimits
@@ -22,7 +22,7 @@ from sc2scala.result_code import ResultCode
 from sc2scala.server.bots_api import BOT_ARCHIVE_SUFFIX, BOT_ARCHIVES
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_ratings import refit_after_result
-from sc2scala.server.ladders_api import MAP_FILES
+from sc2scala.server.ladders_api import MAP_FILES, computer_player
 from sc2scala.server.match_draw import LEASED, VOID, draw_match, record_result, void_expired_leases
 from sc2scala.server.models import MatchRecord, RunnerMachine, utc_now
 from sc2scala.server.runners_api import remove_runner_machine
@@ -114,7 +114,8 @@ def report_result(
     engine_logs: UploadFile | None = None,
 ) -> dict[str, Any]:
     """Finishes a match leased to the machine with its result, a JSON object of `code`, `game_steps` and
-    `average_step_times`, and keeps its replay and logs; the ladder's ratings are refitted once the runner is answered.
+    `average_step_times`, and keeps its replay and logs, but for player 2's against the computer, which has none; the
+    ladder's ratings are refitted once the runner is answered.
 
     409 once the match is void, its deadline passed among others.
     """
@@ -127,6 +128,8 @@ def report_result(
             replay.file, kind=REPLAYS, suffix=REPLAY_SUFFIX, max_bytes=max_bytes, check=_check_replay
         )
         match.replay_sha256 = stored.sha256
+    if match.player_2_computer_id is not None:
+        player_2_logs = None
     for field_name, upload in zip(_LOG_FIELDS, (player_1_logs, player_2_logs, engine_logs), strict=True):
         if upload is not None:
             stored, _ = file_store.store(
@@ -176,16 +179,7 @@ def match_for_runner(match: MatchRecord) -> dict[str, Any]:
         for seat, (version, race) in enumerate(zip(match.bot_versions, races, strict=False), start=1)
     ]
     if match.player_2_computer is not None:
-        computer = match.player_2_computer.computer
-        players.append(
-            {
-                "seat": 2,
-                "computer": computer.name,
-                "race": computer.race.value,
-                "difficulty": computer.difficulty.value,
-                "build": computer.build.value,
-            }
-        )
+        players.append({"seat": 2, **computer_player(match.player_2_computer)})
     return {
         "id": match.id,
         "ladder": match.ladder.name,

@@ -8,6 +8,7 @@ import pytest
 from alembic import command
 from fastapi import HTTPException
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from sc2scala.bot_archive import type_of_bot_archive
@@ -197,6 +198,15 @@ def test_the_migration_to_computers_keeps_every_bot_entry_match_and_rating(tmp_p
             )
         )
     assert counts() == [2, 2, 2, 2, 1]
+    for seat_2 in ("NULL, NULL", "2, 1"):
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO matches (ladder_id, map_id, player_1_version_id, player_2_version_id,"
+                    " player_2_computer_id, player_1_race, player_2_race, status, drawn_at, deadline) VALUES"
+                    f" (1, 1, 1, {seat_2}, 'T', 'Z', 'leased', '2026-11-01', '2026-11-01')"
+                )
+            )
     command.downgrade(config, "5d2c8e1f9a47")
     assert counts() == [2, 2, 2, 1, 1]
     engine.dispose()

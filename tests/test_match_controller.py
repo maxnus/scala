@@ -13,7 +13,14 @@ from s2clientprotocol import common_pb2, sc2api_pb2
 import sc2scala.match_controller
 import sc2scala.match_controller.match_controller as match_controller_module
 from sc2scala import ResultCode
-from sc2scala.match_controller.controller_config import ComputerConfig, ControllerConfig, SeatConfig
+from sc2scala.computer import Build, Difficulty
+from sc2scala.match_controller.controller_config import (
+    BUILDS,
+    DIFFICULTIES,
+    ComputerConfig,
+    ControllerConfig,
+    SeatConfig,
+)
 from sc2scala.match_controller.match_controller import (
     ERROR,
     INITIALIZATION_ERROR,
@@ -351,6 +358,14 @@ def test_the_config_reads_back_as_written(tmp_path: Path) -> None:
         _config(tmp_path, urls, computer=_COMPUTER)
     with pytest.raises(ValueError):
         _config(tmp_path, urls, seats=(SeatConfig("alpha", "T", "", 0),))
+
+
+def test_a_computer_s_difficulty_and_build_are_the_protocol_s_and_scala_s() -> None:
+    assert set(DIFFICULTIES) == set(sc2api_pb2.Difficulty.keys()) == {difficulty.value for difficulty in Difficulty}
+    assert set(BUILDS) == set(sc2api_pb2.AIBuild.keys()) == {build.value for build in Build}
+    for wrong in ({"difficulty": "VeryHrd"}, {"build": "Turtle"}, {"race": "Terran"}):
+        with pytest.raises(ValueError):
+            replace(_COMPUTER, **wrong)
 
 
 def test_the_controller_runs_on_its_own_with_nothing_else_of_scala_s(tmp_path: Path) -> None:

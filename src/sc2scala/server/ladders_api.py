@@ -394,13 +394,18 @@ def standing_summary(standing: Standing | ComputerStanding) -> dict[str, Any]:
 
 
 def computer_summary(held: LadderComputer) -> dict[str, Any]:
+    """The computer as a ladder lists it: as a player, and whether it is paused."""
+    return {**computer_player(held), "paused": held.paused}
+
+
+def computer_player(held: LadderComputer) -> dict[str, Any]:
+    """The computer as a player of a match: its name, race, difficulty and build."""
     computer = held.computer
     return {
         "computer": computer.name,
         "race": computer.race.value,
         "difficulty": computer.difficulty.value,
         "build": computer.build.value,
-        "paused": held.paused,
     }
 
 

@@ -16,7 +16,8 @@ import httpx
 from loguru import logger
 
 from sc2scala.client_credentials import ClientCredentials, default_credentials_file
-from sc2scala.engine_choice import ENGINE_TITLES, engine_named, images_of_every_engine
+from sc2scala.engine_choice import engine_named, images_of_every_engine
+from sc2scala.engine_names import ENGINE_TITLES
 from sc2scala.errors import ScalaError, ServerError
 from sc2scala.match_engine import MatchEngine
 from sc2scala.runner import Runner

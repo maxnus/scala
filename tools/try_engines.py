@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sc2scala.computer import is_computer_name
-from sc2scala.engine_choice import ENGINE_NAMES, ENGINES_PLAYING_COMPUTERS
+from sc2scala.engine_names import ENGINE_NAMES, ENGINES_PLAYING_COMPUTERS
 
 _REPOSITORY = Path(__file__).resolve().parent.parent
 _OPPONENT = "loser_bot"

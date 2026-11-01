@@ -4,6 +4,20 @@ from pathlib import Path
 from typing import Any
 
 RACE_LETTERS = ("T", "Z", "P", "R")
+DIFFICULTIES = (
+    "VeryEasy",
+    "Easy",
+    "Medium",
+    "MediumHard",
+    "Hard",
+    "Harder",
+    "VeryHard",
+    "CheatVision",
+    "CheatMoney",
+    "CheatInsane",
+)
+BUILDS = ("RandomBuild", "Rush", "Timing", "Power", "Macro", "Air")
+"""The computer's difficulties and builds, as the protocol names them."""
 
 
 @dataclass(frozen=True)
@@ -37,8 +51,13 @@ class ComputerConfig:
     build: str
 
     def __post_init__(self) -> None:
-        if self.race not in RACE_LETTERS:
-            raise ValueError(f"A race is one of {', '.join(RACE_LETTERS)}, not {self.race!r}")
+        for value, allowed, what in (
+            (self.race, RACE_LETTERS, "race"),
+            (self.difficulty, DIFFICULTIES, "difficulty"),
+            (self.build, BUILDS, "build"),
+        ):
+            if value not in allowed:
+                raise ValueError(f"A computer's {what} is one of {', '.join(allowed)}, not {value!r}")
 
 
 @dataclass(frozen=True)

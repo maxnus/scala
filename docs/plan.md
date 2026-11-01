@@ -121,11 +121,11 @@ matches made in advance. The server picks:
 
 A ladder with [computer opponents](#computer-opponents) draws its two players among its bots and its computers alike,
 any pair but two computers, uniformly, the computer always in seat 2, as the game numbers it, and plays once it has one
-bot and one computer. Every ladder's weight is then
-its number of active bots over the bots one of its matches seats on average, 2 for a pair of bots and 1 for a bot and
-a computer, which for a ladder of bots alone is half its bots, as before but for the scale; so a bot still gets about
-as many games whichever ladder it is in. A ladder of 2 bots and 6 computers has 13 pairs, 12 of which seat one bot,
-and weighs 2 / (14 / 13), about 1.9, against 1 for a ladder of 2 bots alone.
+bot and one computer. Every ladder's weight is then its number of active bots over the bots one of its matches seats
+on average, 2 for a pair of bots and 1 for a bot and a computer, which for a ladder of bots alone is half its bots, as
+before but for the scale; so a bot still gets about as many games whichever ladder it is in. A ladder of 2 bots and 6
+computers has 13 pairs, 12 of which seat one bot, and weighs 2 / (14 / 13), about 1.9, against 1 for a ladder of 2 bots
+alone.
 
 The match is leased to the runner until a deadline, the ladder's real-time limit and a margin. A result after the
 deadline, or none, voids it; the next match is drawn afresh, so none is played again. A bot may play several matches at
@@ -444,9 +444,9 @@ Each step ends in something that runs, and is a pull request of its own.
    - 8b, built: computer opponents, as [above](#computer-opponents): a ladder's owner adds, pauses and removes them on
      its settings page or by `sc2scala ladder add-computer` and the like, each kept in its ladder, and a match's seat 2
      holds a bot's version or a computer; the draw seats one for a runner whose engine plays it, which a runner names
-     when it asks for a match and in its log as it starts; a computer is rated in its ladder as a bot is, in its standings
-     and pairs; and `sc2scala play BOT Computer-...` plays one on a machine with no server. On Scala's engine, AI
-     Arena's test bots lost to the computer of a random race, crashed, left and failed to connect as
+     when it asks for a match and in its log as it starts; a computer is rated in its ladder as a bot is, in its
+     standings and pairs; and `sc2scala play BOT Computer-...` plays one on a machine with no server. On Scala's
+     engine, AI Arena's test bots lost to the computer of a random race, crashed, left and failed to connect as
      `tools/try_engines.py` expects, and NachOS's demo bot beat the easiest computer of a random race twice.
    - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's machines;
      `runner pull`, the setup script and the guides then fetch only the images Scala's uses, its bot environment moved

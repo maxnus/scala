@@ -15,7 +15,7 @@ from sc2scala import Race
 from sc2scala.cli import main
 from sc2scala.computer import Build, Computer, Difficulty
 from sc2scala.server.match_draw import _weight_of_ladder
-from sc2scala.server.models import LadderEntry
+from sc2scala.server.models import LadderEntry, MatchRecord
 from tests.conftest import PYTHON_BOT_ZIP, api_headers_of, sign_in_dev
 from tests.match_helpers import LadderWithBots, draw, ladder_with_bots, report
 from tests.test_bot_forms import submit
@@ -130,6 +130,9 @@ def test_a_computer_is_rated_as_a_bot_is_and_has_no_logs(ladder: LadderWithBots)
     assert played["players"][1] == {"computer": _ZERG, "difficulty": "VeryHard", "build": "Rush", "race": "Z"}
     assert ladder.server.get(f"/api/matches/{match['id']}/logs/2", headers=ladder.alice).status_code == 404
     assert ladder.server.get(f"/api/matches/{match['id']}/logs/1", headers=ladder.alice).status_code == 200
+    with Session(ladder.server.app.state.engine) as session:  # type: ignore[attr-defined]
+        record = session.get(MatchRecord, match["id"])
+        assert record is not None and record.player_2_logs_sha256 is None and record.player_1_logs_sha256
     pairs = ladder.server.get("/ladders/league/pairs")
     assert f"<th>{_ZERG}</th>" in pairs.text and "0–1–0" in pairs.text
 
@@ -142,7 +145,7 @@ def test_a_failed_start_against_the_computer_counts_for_the_bot(ladder: LadderWi
     report(ladder.server, ladder.runner, match["id"], "InitializationError")
     with Session(ladder.server.app.state.engine) as session:  # type: ignore[attr-defined]
         assert [entry.failed_starts_in_a_row for entry in session.query(LadderEntry)] == [1]
-    assert standings(ladder)[1]["games"] == 0
+    assert {row.get("bot") or row["computer"]: row["games"] for row in standings(ladder)} == {"basic_bot": 0, _ZERG: 0}
 
 
 def test_a_computer_that_played_is_retired_and_added_again_keeps_its_record(ladder: LadderWithBots) -> None:
@@ -175,6 +178,7 @@ def test_the_owner_adds_pauses_and_removes_computers_on_the_settings_page(ladder
     fields = {"race": "R", "difficulty": "Harder", "build": "Macro"}
     page = submit(browser, settings, "/ladders/league/computers", fields)
     assert "Added Computer-Harder-Random-Macro" in page.text and "Computer-Harder-Random-Macro</td>" in page.text
+    assert '2 <span class="muted">and 1 computer</span>' in browser.get("/").text
     page = submit(browser, settings, "/ladders/league/computers/Computer-Harder-Random-Macro/pause", {})
     assert "Paused Computer-Harder-Random-Macro" in page.text
     ladder_page = browser.get("/ladders/league").text
@@ -205,7 +209,7 @@ def test_the_cli_adds_lists_and_removes_computers(
     command = ["ladder", "add-computer", "league", "--race", "zerg", "--difficulty", "veryhard", "--build", "rush"]
     assert main(command, http=ladder.server) == 0
     out = capsys.readouterr().out
-    assert "2 bots and 1 computers" in out and f"  {_ZERG}, the game's" in out
+    assert "2 bots and 1 computer on" in out and f"  {_ZERG}, the game's" in out
     assert main(["ladder", "standings", "league"], http=ladder.server) == 0
     assert f". {_ZERG}: unrated, 0 games, 0-0-0" in capsys.readouterr().out
     assert main(["ladder", "pause-computer", "league", _ZERG], http=ladder.server) == 0

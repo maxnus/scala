@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from sc2scala.server.file_store import FileStore
-from sc2scala.server.ladders_api import visible_ladder
+from sc2scala.server.ladders_api import computer_player, visible_ladder
 from sc2scala.server.models import MatchRecord, User
 from sc2scala.server.runner_api import LOGS, LOGS_SUFFIX, REPLAY_SUFFIX, REPLAYS
 from sc2scala.server.web import DatabaseSession, token_user
@@ -105,15 +105,7 @@ def match_summary(record: MatchRecord) -> dict[str, Any]:
         for version, race in zip(record.bot_versions, races, strict=False)
     ]
     if record.player_2_computer is not None:
-        computer = record.player_2_computer.computer
-        players.append(
-            {
-                "computer": computer.name,
-                "difficulty": computer.difficulty.value,
-                "build": computer.build.value,
-                "race": record.player_2_race,
-            }
-        )
+        players.append(computer_player(record.player_2_computer))
     return {
         "id": record.id,
         "ladder": record.ladder.name,

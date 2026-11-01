@@ -20,7 +20,8 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
    `master` in March 2025, while aiarena.net runs `master`, rewritten for its Kubernetes cluster, which hard-codes the
    game's limits; and "v0.8.0" names the bot environment inside, not a release, the last GitHub release being v0.6.10
    of 2024. Everything wanted next needed changes to it: [computer opponents](#computer-opponents), which it cannot
-   seat; the step-time limit, which it reads and ignores; and the bot environment aiarena.net has moved on to. Scala's
+   seat; the step-time limit, which it reads and ignores, as aiarena.net's does; and the bot environment aiarena.net
+   has moved on to. Scala's
    engine keeps what made AI Arena's worth taking, its contract with the bots, so that an AI Arena bot plays here
    unchanged, as [the engine](#the-engine) says.
 3. **A runner serves the ladders its owner picks**: every public ladder, a list of ladders, or both. A
@@ -117,8 +118,11 @@ matches made in advance. The server picks:
 3. a map of its pool, uniformly at random.
 
 A ladder with [computer opponents](#computer-opponents) draws its two players among its bots and its computers alike,
-any pair but two computers, and plays once it has one bot and one computer; its weight then allows for the seats its
-computers take, so that a bot still gets about as many games whichever ladder it is in.
+any pair but two computers, uniformly, and plays once it has one bot and one computer. Every ladder's weight is then
+its number of active bots over the bots one of its matches seats on average, 2 for a pair of bots and 1 for a bot and
+a computer, which for a ladder of bots alone is half its bots, as before but for the scale; so a bot still gets about
+as many games whichever ladder it is in. A ladder of 2 bots and 6 computers has 13 pairs, 12 of which seat one bot,
+and weighs 2 / (14 / 13), about 1.9, against 1 for a ladder of 2 bots alone.
 
 The match is leased to the runner until a deadline, the ladder's real-time limit and a margin. A result after the
 deadline, or none, voids it; the next match is drawn afresh, so none is played again. A bot may play several matches at
@@ -154,7 +158,9 @@ as many as they like, each of:
   `CheatMoney` or `CheatInsane`;
 - a build: `Rush`, `Timing`, `Power`, `Macro`, `Air` or random.
 
-A computer is named for these, as *Computer VeryHard Zerg Rush*, and a ladder holds each such computer once. It plays
+A computer is named for these, in the protocol's words and in the alphabet of bot names, as
+`Computer-VeryHard-Zerg-Rush` or `Computer-Hard-Random-RandomBuild`, and a ladder holds each such computer once; from
+step 8b a bot's name may not start with `Computer-`, so that no bot passes for one. It plays
 through [Scala's engine](#the-engine), which creates the game with a seat for the bot and one for the computer, in one
 game client, which the bot joins alone; AI Arena's engine always creates a game for two bots.
 
@@ -165,9 +171,10 @@ computer's difficulty and build, in its game information, which stays as it is, 
 computer sees them; the bot's `--OpponentId` is the computer's name.
 
 A computer neither crashes nor runs out of time, and has no logs or step time; an `InitializationError` counts only
-for the bot. It is rated in its ladder as a bot is, a row of the standings, and as one player for good, since it never
-changes: so it anchors the ladder's ratings over time, as no bot's version does. Its owner pauses or removes it, and
-one that played is retired rather than deleted, as a bot is (decision 10), so that its matches keep their player.
+for the bot. It is rated in its ladder as a bot is, a row of the standings, and as one player for good: like a bot's
+version it never changes, but no newer one replaces it, so it plays on and anchors the ladder's ratings over time.
+The ladder's owner pauses or removes it, and one that played is retired rather than deleted, as a bot is (decision
+10), so that its matches keep their player.
 
 Only a runner whose Scala plays computers draws a match with one: a runner names its engine when it asks for a match.
 
@@ -220,7 +227,8 @@ A runner executes strangers' code, so every match runs sandboxed, as [the sandbo
   else;
 - as the runner's user, with no capabilities and no way to gain any;
 - within each bot's limits of CPU, memory, processes and logs, `ResourceLimits`, set by the ladder;
-- in fresh containers, with nothing of the runner's own, its token least of all, mounted anywhere.
+- in fresh containers, with nothing of the runner's own, its token least of all, mounted anywhere, but for a copy of
+  the engine's code in the match controller's, as [the engine](#the-engine) says.
 
 A runner that plays strangers' bots runs as a user of its own, with rootless Docker, so that a bot that breaks out
 lands as a user who owns nothing of its owner's.
@@ -228,7 +236,8 @@ lands as a user who owns nothing of its owner's.
 ### The engine
 
 Scala's engine plays one match in Docker containers, as AI Arena's did, behind the same interface, `MatchEngine`, so
-that the runner, the server and the sandbox stay as they are:
+that in step 8a the runner, the server and the sandbox stay as they are; step 8b then gives a match, the match a runner
+is offered and the files it reports a computer's seat:
 
 - **the game**: a Linux StarCraft II 4.10 for each bot, from AI Arena's `arenaclient-sc2` image, started directly
   rather than by the image's own controller;
@@ -259,8 +268,11 @@ of the table above.
 
 The images are AI Arena's, at tags Scala pins; the bot environment's is Scala's choice, v0.8.0 as now or v0.9.0 as
 aiarena.net's, which step 8a settles by trying bots on both. The match controller runs from an image the runner pulls
-anyway, with Scala's code and the few packages it needs mounted read-only, so that Scala publishes no image of its own;
-which image, step 8a settles too.
+anyway, the bot environment's say, whose Python, 3.12 in v0.8.0, runs Scala's code, so that Scala publishes no image of
+its own;
+which image, step 8a settles too. Its code and the few packages it needs are copied into the match's work folder and
+mounted read-only from there, and nothing else of the runner's: not its home, its install, its config or its token,
+since every bot reaches that container.
 
 The match controller is tested in-process, against a fake game and fake bots, for each way a game can end, with no
 Docker; tests that start containers are marked `integration`, as now. Until step 8c, AI Arena's engine stays, chosen
@@ -404,8 +416,10 @@ Each step ends in something that runs, and is a pull request of its own.
      2026-11-01, set up by the command, and waits for the ladder's bots.
 8. **Scala's own engine, and computer opponents**, as [the engine](#the-engine) and
    [computer opponents](#computer-opponents) say, in three pull requests:
-   - 8a: Scala's engine playing bot against bot, with the step-time limit applied, and AI Arena's still chosen by
-     `runner.toml`; tried with bots of every type in `sc2scala play`.
+   - 8a: Scala's engine playing bot against bot, with the step-time limit applied; tried with bots of every type in
+     `sc2scala play`. AI Arena's stays the default until 8c, and a runner plays with Scala's by `engine` in its
+     `runner.toml`, as max-9950 does on test-ladder; `runner pull` fetches the images of both, which the setup
+     script's check of free space allows for.
    - 8b: computer opponents, on the server, its pages and the CLI, in the draw and the ratings, and in the engine.
    - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's
      machines; `runner pull`, the setup script and the guides then fetch only the images Scala's uses.
@@ -430,6 +444,7 @@ Each step ends in something that runs, and is a pull request of its own.
 ## Prior art
 
 [AI Arena](https://aiarena.net) runs its own competitions, on arena clients that fetch its matches, and its code is
-open: the site, [`aiarena-web`](https://github.com/aiarena/aiarena-web) (Django), and the match controller above, both
+open: the site, [`aiarena-web`](https://github.com/aiarena/aiarena-web) (Django), and its match controller, which
+decision 2 tells of, both
 GPL-3.0. Scala adds what AI Arena does not have: anyone's ladders, protected ladders, and runners that choose their
 ladders and their hours.

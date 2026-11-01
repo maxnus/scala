@@ -112,3 +112,18 @@ def test_the_dev_sign_in_needs_a_local_public_url_behind_a_proxy(tmp_path: Path)
     )
     with pytest.raises(ValueError, match="local public_url"):
         ServerConfig.from_data_folder(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "public_url", ["https://scala.example.org/$(id)", 'https://scala.example.org/"', "ftp://scala.example.org"]
+)
+def test_a_public_url_that_could_be_more_than_an_address_is_refused(tmp_path: Path, public_url: str) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(f"public_url = '{public_url}'\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="the runner setup script holds it"):
+        ServerConfig.from_data_folder(tmp_path)
+
+
+@pytest.mark.parametrize("public_url", ["https://213-171-209-79.sslip.io", "http://[::1]:8000", "https://a.org/scala"])
+def test_a_public_url_of_host_port_and_path_is_taken(tmp_path: Path, public_url: str) -> None:
+    (tmp_path / CONFIG_FILE_NAME).write_text(f"public_url = '{public_url}'\n", encoding="utf-8")
+    assert ServerConfig.from_data_folder(tmp_path).public_url == public_url

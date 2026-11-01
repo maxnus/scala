@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 import tomllib
 from dataclasses import dataclass
@@ -12,6 +13,9 @@ CONFIG_FILE_NAME = "server.toml"
 _SECRET_KEY_FILE_NAME = "secret_key"
 DATABASE_FILE_NAME = "scala.db"
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+SHELL_SAFE_URL = re.compile(r"https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]+)?(/[A-Za-z0-9._/-]*)?")
+"""An address that is nothing more in double quotes in a shell script, as the runner setup script holds public_url: no
+quote, `$`, backquote or backslash."""
 
 _DEFAULT_CONFIG = """\
 # Scala's server. Its pages are served at public_url, to which GitHub's sign-in returns.
@@ -73,6 +77,11 @@ class ServerConfig:
     keep_logs_days: int = 30
 
     def __post_init__(self) -> None:
+        if not SHELL_SAFE_URL.fullmatch(self.public_url):
+            raise ValueError(
+                f"public_url is an http or https address of letters, digits, '.' and '-', with a port and a path if "
+                f"any, not {self.public_url!r}: the runner setup script holds it"
+            )
         if self.dev_sign_in and self.host not in _LOCAL_HOSTS:
             raise ValueError(f"dev_sign_in lets anyone in, so it needs a local host, not {self.host!r}")
         if self.dev_sign_in and urlparse(self.public_url).hostname not in _LOCAL_HOSTS:

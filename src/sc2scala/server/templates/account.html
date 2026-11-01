@@ -77,6 +77,12 @@
         {% endfor %}
       </tbody>
     </table>
+    <p class="note">
+      A machine the setup command set up updates by the same command without a code,
+      <code>curl -fsSL {{ request.app.state.config.public_url }}/runner/setup.sh | sudo bash</code>, and is removed,
+      with its user and its Docker's images, by
+      <code>curl -fsSL {{ request.app.state.config.public_url }}/runner/setup.sh | sudo bash -s -- --remove</code>.
+    </p>
   {% else %}
     <p class="muted">None yet.</p>
   {% endif %}

@@ -4,6 +4,7 @@ import os
 import re
 import signal
 import socket
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -109,6 +110,12 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     )
     stop.add_argument("--now", action="store_true", help="stop the matches being played as well, which are void")
     commands.add_parser(
+        "pull",
+        help="download the engine's images",
+        description="Downloads the engine's Docker images that Docker lacks, about 11 GB at first, showing Docker's "
+        "progress; `runner start` downloads them too, quietly.",
+    )
+    commands.add_parser(
         "service",
         help="write a systemd service that runs the runner",
         description=f"Writes the systemd user service {_SERVICE_NAME}, which runs `sc2scala runner start`, and says "
@@ -137,6 +144,8 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
             _start(args, http=http, engine=engine)
         case "stop":
             return _stop(now=args.now)
+        case "pull":
+            _pull_images()
         case "service":
             _write_service()
     return 0
@@ -297,6 +306,21 @@ def _stop(*, now: bool) -> int:
             "`sc2scala runner stop --now` stops them as well"
         )
     return 0
+
+
+def _pull_images() -> None:
+    """Pulls each of the engine's images that Docker lacks, showing Docker's progress; raises `ScalaError` if Docker
+    cannot."""
+    for image in AiArenaEngine().images:
+        try:
+            if subprocess.run(["docker", "image", "inspect", image], capture_output=True, check=False).returncode == 0:
+                print(f"{image}: here already")
+                continue
+            pulled = subprocess.run(["docker", "pull", image], check=False).returncode == 0
+        except FileNotFoundError as error:
+            raise ScalaError("Docker is not installed, or not on PATH") from error
+        if not pulled:
+            raise ScalaError(f"Docker could not pull {image}")
 
 
 def _write_service() -> None:

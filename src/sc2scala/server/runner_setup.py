@@ -1,15 +1,20 @@
-"""Adding a runner by a setup code: the page that makes one, and its exchange for a runner machine.
+"""Adding a runner by a setup code: the page that makes one, its exchange for a runner machine, and the script that
+sets a machine up around it.
 
 A signed-in user asks the page for a code, saying which ladders the machine is to serve. The machine exchanges the code
 for itself and its token, by `sc2scala runner register --setup-code`, with no other token. So a code is as random as a
-token, kept as its hash, works once, and only for an hour.
+token, kept as its hash, works once, and only for an hour. The setup script, `runner_setup.sh`, runs that command and
+everything around it, as root; the server serves it as the package holds it, with its own address filled in, and the
+page shows its SHA-256, which whoever runs it may compare with that of the repository's file with the same address.
 """
 
+import hashlib
 from datetime import timedelta
+from importlib.resources import files
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.orm import Session
@@ -27,6 +32,7 @@ from sc2scala.server.runners_api import (
     new_machine,
     void_leased_matches,
 )
+from sc2scala.server.server_config import SHELL_SAFE_URL
 from sc2scala.server.web import DatabaseSession, check_csrf, refusal_reason, render, required_user
 
 router = APIRouter()
@@ -36,6 +42,9 @@ MOST_SETUP_CODES_WAITING = 10
 """How many unused codes one user may hold at once, so that codes nobody uses cannot fill the database."""
 _ADD_RUNNER_PAGE = "/runners/add"
 _NO_SUCH_CODE = "No setup code like that waits: it was used already, or expired; make another on the Add a runner page"
+SETUP_SCRIPT_PATH = "/runner/setup.sh"
+_SETUP_SCRIPT_FILE = "runner_setup.sh"
+SERVER_PLACEHOLDER = "__SCALA_SERVER__"
 
 SignedInUser = Annotated[User, Depends(required_user)]
 
@@ -86,7 +95,16 @@ def make_setup_code(
             refusal=refusal_reason(error),
             status_code=error.status_code,
         )
-    page = render(request, "runner_add.html", user=user, code=code, setup_code=setup_code)
+    public_url = request.app.state.config.public_url
+    page = render(
+        request,
+        "runner_add.html",
+        user=user,
+        code=code,
+        setup_code=setup_code,
+        setup_script_url=public_url + SETUP_SCRIPT_PATH,
+        setup_script_sha256=hashlib.sha256(setup_script(public_url).encode()).hexdigest(),
+    )
     page.headers["Cache-Control"] = "no-store"
     return page
 
@@ -102,6 +120,25 @@ def register_by_setup_code_route(session: DatabaseSession, exchange: SetupCodeEx
         session, code=exchange.setup_code, name=exchange.name, replace=exchange.replace
     )
     return {**machine_summary(session, machine), "token": token}
+
+
+@router.get(SETUP_SCRIPT_PATH)
+def setup_script_route(request: Request) -> Response:
+    """The setup script, with this server's address in it, for anyone: it holds no secret, and asks for a setup code."""
+    return Response(
+        setup_script(request.app.state.config.public_url),
+        media_type="text/x-shellscript; charset=utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+def setup_script(public_url: str) -> str:
+    """The setup script as the package holds it, with `public_url` filled in; raises `ValueError` for an address that
+    could be more than an address in the script, which a server's config refuses as it starts."""
+    if not SHELL_SAFE_URL.fullmatch(public_url):
+        raise ValueError(f"{public_url!r} is not an address the setup script may hold")
+    script = files("sc2scala.server").joinpath(_SETUP_SCRIPT_FILE).read_text(encoding="utf-8")
+    return script.replace(SERVER_PLACEHOLDER, public_url)
 
 
 def _render_form(

@@ -31,6 +31,10 @@ pose as it; no test tries that yet.
 The runner, and the Docker that plays its matches, run as a user made for them, here `sc2scala`. Docker runs rootless:
 its daemon and its containers' root are that user, not root.
 
+On Ubuntu 24.04 and later, the command the server's *Add a runner* page gives does all of the steps below, and checks
+what they check; its script is `src/sc2scala/server/runner_setup.sh`. The steps are for doing it by hand, as on another
+Linux, where the script stops.
+
 These steps are for Ubuntu 24.04 and later, and need sudo once. Ubuntu restricts the user namespaces rootless Docker
 makes (`kernel.apparmor_restrict_unprivileged_userns`); its `apparmor` package allows them to Ubuntu's own
 `/usr/bin/rootlesskit`, so no AppArmor rule of your own is needed.
@@ -54,11 +58,19 @@ makes (`kernel.apparmor_restrict_unprivileged_userns`); its `apparmor` package a
    ```bash
    sudo -iu sc2scala
    export XDG_RUNTIME_DIR=/run/user/$(id -u)
-   PATH=/usr/share/docker.io/contrib:$PATH dockerd-rootless-setuptool.sh install
+   mkdir -p ~/.local/libexec/docker-rootless && cd ~/.local/libexec/docker-rootless
+   ln -sf /usr/share/docker.io/contrib/dockerd-rootless.sh /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh .
+   ln -sf "$(command -v docker)" .
+   PATH=~/.local/libexec/docker-rootless:$PATH dockerd-rootless-setuptool.sh install
    docker context use rootless
    ```
 
-   Ubuntu keeps the setup tool, and the `dockerd-rootless.sh` it starts, in `/usr/share/docker.io/contrib`.
+   Docker's setup tool, `dockerd-rootless-setuptool.sh`, looks for `docker` in its own folder, and for
+   `dockerd-rootless.sh`, which the service runs, on `PATH`. Ubuntu's docker.io keeps both scripts in
+   `/usr/share/docker.io/contrib`, apart from `docker`, so a folder of links holds them together. Ubuntu 24.04's
+   docker.io lacks the two scripts: download them, rather than link them, from Docker's repository at the version it
+   installs, as `https://raw.githubusercontent.com/moby/moby/docker-v29.1.3/contrib/dockerd-rootless.sh` and the same
+   for the setup tool. The setup script does all of this, and checks the downloads against their SHA-256.
 
 4. Check, still as that user, that Docker runs rootless, and that the user may limit CPU, memory and processes, which
    the sandbox needs; Ubuntu's systemd gives every user all three:

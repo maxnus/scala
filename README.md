@@ -32,9 +32,23 @@ On a server's pages, once signed in:
 
 A runner machine plays the matches a server draws for it: every public ladder, or the ladders you choose. It needs
 x86-64 Linux and Docker with Compose 2.20 or later, whose `docker` command your user can run; on Windows, it runs in
-WSL2, as [the WSL2 guide](docs/wsl2.md) says, which nobody has tried on Windows yet. Get Scala from this repository.
-On the server, *Add a runner*, on your page or a ladder's, makes a setup code for a machine serving the ladders you
-tick. Register the machine with it, and start it:
+WSL2, as [the WSL2 guide](docs/wsl2.md) says, which nobody has tried on Windows yet. On the server, *Add a runner*, on
+your page or a ladder's, makes a setup code for a machine serving the ladders you tick, and gives the command that sets
+the machine up with it, on Ubuntu 24.04 or later:
+
+```bash
+curl -fsSL https://scala.example.org/runner/setup.sh | sudo bash -s -- scala_setup_...
+```
+
+It checks the machine first, x86-64 with 16 GiB of memory and 50 GB free; installs Docker and what rootless Docker
+needs; makes the user `sc2scala`, with rootless Docker, so that a bot that breaks out of its container lands as a user
+who owns nothing of yours; installs Scala; registers the machine; downloads the engine's images, about 11 GB; and starts
+the runner as that user's service, saying what it does at each step. Run again without a code, it updates the machine;
+with `--remove`, it removes the machine, the user and its images. The page shows the script's SHA-256, to check it
+before it runs as root. Scala is not on PyPI yet, so for now the script installs the wheel it is given, as `sudo
+SC2SCALA_PACKAGE=/path/to/sc2scala.whl bash`.
+
+By hand, as on another Linux, get Scala from this repository, register the machine with the setup code, and start it:
 
 ```bash
 uv sync
@@ -126,3 +140,4 @@ the server runs. The server keeps a match's logs 30 days, and its replay for goo
 | Type check | `uv run pyright` |
 | Measure one match's memory and CPU | `uv run python tools/measure_match.py BOT BOT --map MAP` |
 | Write a migration for a change to the server's models | `uv run python tools/new_migration.py "what changed"` |
+| Try the runner setup script in a fresh Ubuntu VM | `uv run python tools/try_runner_setup.py --release 24.04 --wheel WHEEL --server-url URL --setup-code CODE` |

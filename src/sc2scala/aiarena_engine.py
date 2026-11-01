@@ -89,10 +89,16 @@ class AiArenaEngine:
 
         Raises `MatchTimeoutError` if the match runs past its real-time limit and a margin, `MatchStoppedError` if
         `stop_matches` stopped it, and `EngineError` for a Windows bot, or if Docker is missing, a container does not
-        start, or the engine reports no result. A match that raises leaves its work folder, but for its copies of the
-        bots and the map.
+        start, or the engine reports no result, and for a bot playing itself, since the game would make both its seats
+        player 1 (in game, 4.10). A match that raises leaves its work folder, but for its copies of the bots and the
+        map.
         """
         refuse_windows_bots(match)
+        if match.player_1.name == match.player_2.name:
+            raise EngineError(
+                f"AI Arena's engine cannot play {match.player_1.name} against itself: the game makes two players who "
+                "join under one name one player; Scala's engine can"
+            )
         prepare_output_folder(output_folder)
         logs_folder = output_folder / "logs"
         logs_folder.mkdir()

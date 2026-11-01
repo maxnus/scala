@@ -43,6 +43,8 @@ the other side to answer a close, which a bot busy at the game's end may never d
 _REFUSED_CLOSE_CODE = 1008
 _LISTEN_ADDRESS = "0.0.0.0"
 """Every IPv4 address, as Docker's networks have them."""
+_LOOKUP_TRIES = 3
+_LOOKUP_RETRY_SECONDS = 1.0
 
 
 def win_of(seat: int) -> str:
@@ -168,9 +170,11 @@ class MatchController:
         """Waits until the game is created, and returns whether it was, rather than the match decided first."""
         created = asyncio.create_task(self._game_created.wait())
         decided = asyncio.create_task(self._outcome_decided.wait())
-        await asyncio.wait([created, decided], return_when=asyncio.FIRST_COMPLETED)
-        created.cancel()
-        decided.cancel()
+        try:
+            await asyncio.wait([created, decided], return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            created.cancel()
+            decided.cancel()
         return self._game_created.is_set() and self.outcome is None
 
     async def save_replay_from(self, seat: "_Seat") -> None:
@@ -227,40 +231,25 @@ class MatchController:
         )
 
     async def _watch_for_bots(self) -> None:
-        """Decides an initialization error if a bot has not connected in time, or sooner if its name stopped resolving
-        after it had, which means its container stopped."""
+        """Decides an initialization error if a bot has not connected in time, as AI Arena's engine does for a bot that
+        exits at its start, or never connects."""
         timeout = self.config.connect_timeout_seconds
         deadline = self.clock() + timeout
-        check_seconds = min(1.0, timeout / 20)
-        resolved_once = {seat.number: False for seat in self.seats}
         while True:
             waiting = [seat for seat in self.seats if seat.bot is None]
             if not waiting:
                 return
-            names = " and ".join(seat.config.name for seat in waiting)
             if self.clock() > deadline:
+                names = " and ".join(seat.config.name for seat in waiting)
                 self.decide(INITIALIZATION_ERROR, f"{names} did not connect within {timeout:g} seconds")
                 return
-            for seat in waiting:
-                if seat.config.bot_host is None:
-                    continue
-                try:
-                    await _addresses_of(seat.config.bot_host)
-                    resolved_once[seat.number] = True
-                except OSError:
-                    if resolved_once[seat.number]:
-                        self.decide(INITIALIZATION_ERROR, f"{seat.config.name} stopped before it connected")
-                        return
-            await asyncio.sleep(check_seconds)
+            await asyncio.sleep(min(1.0, timeout / 20))
 
     async def _serve_bot(self, seat: "_Seat", connection: ServerConnection) -> None:
         """Takes the connection of `seat`'s bot, if it is from that bot and the first, and plays the seat through it."""
         peer = connection.remote_address[0] if connection.remote_address else None
         if seat.config.bot_host is not None:
-            try:
-                allowed = await _addresses_of(seat.config.bot_host)
-            except OSError:
-                allowed = set()
+            allowed = await _addresses_of(seat.config.bot_host)
             if peer not in allowed:
                 logger.warning(f"Refused a connection to seat {seat.number} from {peer}, which is not its bot")
                 await connection.close(_REFUSED_CLOSE_CODE, "not this seat's bot")
@@ -556,9 +545,22 @@ async def _connected_game(game_url: str) -> ClientConnection:
 
 
 async def _addresses_of(host: str) -> set[str]:
-    """The addresses `host` resolves to; raises `OSError` if it resolves to none."""
-    infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    return {str(info[4][0]) for info in infos}
+    """The addresses `host` resolves to, or none once it failed to resolve `_LOOKUP_TRIES` times, a second apart, so
+    that a resolver too busy to answer once does not cost a bot its seat.
+
+    On a match's networks, which reach nothing outside, Docker's resolver answers a name it does not know as it answers
+    when it is too busy, with a temporary failure (Docker 29.1, probed in step 8a), so that only failing again tells the
+    two apart.
+    """
+    for attempt in range(1, _LOOKUP_TRIES + 1):
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except OSError:
+            if attempt < _LOOKUP_TRIES:
+                await asyncio.sleep(_LOOKUP_RETRY_SECONDS)
+        else:
+            return {str(info[4][0]) for info in infos}
+    return set()
 
 
 def _parsed_response(response: bytes) -> sc2api_pb2.Response:

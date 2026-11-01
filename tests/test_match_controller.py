@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -10,6 +11,7 @@ import pytest
 from s2clientprotocol import common_pb2, sc2api_pb2
 
 import sc2scala.match_controller
+import sc2scala.match_controller.match_controller as match_controller_module
 from sc2scala import ResultCode
 from sc2scala.match_controller.controller_config import ControllerConfig, SeatConfig
 from sc2scala.match_controller.match_controller import (
@@ -294,3 +296,20 @@ def test_the_controller_runs_on_its_own_with_nothing_else_of_scala_s(tmp_path: P
     )
     assert finished.returncode == 2, finished.stderr
     assert "Usage: python -m match_controller CONFIG" in finished.stderr
+
+
+def test_a_name_that_fails_to_resolve_is_tried_again_before_it_counts_as_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failures = {"busy": 2, "gone": 3}
+
+    async def getaddrinfo(self: object, host: str, port: object, **options: object) -> list[tuple[object, ...]]:
+        if failures[host]:
+            failures[host] -= 1
+            raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.2", 0))]
+
+    monkeypatch.setattr(asyncio.BaseEventLoop, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(match_controller_module, "_LOOKUP_RETRY_SECONDS", 0.0)
+    assert asyncio.run(match_controller_module._addresses_of("busy")) == {"10.0.0.2"}
+    assert asyncio.run(match_controller_module._addresses_of("gone")) == set()

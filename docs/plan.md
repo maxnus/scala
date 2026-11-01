@@ -245,8 +245,8 @@ is offered and the files it reports a computer's seat:
   rather than by the image's own controller;
 - **each bot**, in AI Arena's bot environment, the image `arenaclient-bot-base`, started as AI Arena starts it: in its
   folder, as [its type](#bots) says, with `--GamePort` and `--StartPort` naming the match controller's port,
-  `--LadderServer` its address and `--OpponentId` the opponent's name, and its output in its log; a bot that exits
-  within its first seconds failed to start;
+  `--LadderServer` its address and `--OpponentId` the opponent's name, and its output in its log; a bot that does
+  not connect within 30 seconds, as one that exits at its start, failed to start;
 - **the match controller**, Scala's own, between the bots and the game, in a container on every network of the match.
 
 The match controller does what AI Arena's does, as its v0.8.0 source shows:

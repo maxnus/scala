@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -8,7 +9,19 @@ from typing import Any
 
 import pytest
 
-from sc2scala import Bot, BotType, EngineError, GameLimits, Match, Race, ResourceLimits, ResultCode, ScalaEngine
+from sc2scala import (
+    Bot,
+    BotType,
+    EngineError,
+    GameLimits,
+    Match,
+    MatchStoppedError,
+    MatchTimeoutError,
+    Race,
+    ResourceLimits,
+    ResultCode,
+    ScalaEngine,
+)
 from sc2scala.match_controller.controller_config import ControllerConfig
 from tests.bot_folders import make_map, make_python_bot
 
@@ -21,17 +34,30 @@ class FakeDocker:
     and the bots write.
 
     With `player_1_log_bytes`, player 1's log grows to that size during `wait`, which then waits for player 1 to be
-    killed.
+    killed. `create` exits with `create_exit_code`, and `wait` times out with `wait_times_out`.
     """
 
-    def __init__(self, *, controller_result: dict[str, Any] | None = None, player_1_log_bytes: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        controller_result: dict[str, Any] | None = None,
+        player_1_log_bytes: int = 0,
+        create_exit_code: int = 0,
+        wait_times_out: bool = False,
+    ) -> None:
         self.controller_result = controller_result
         self.player_1_log_bytes = player_1_log_bytes
+        self.create_exit_code = create_exit_code
+        self.wait_times_out = wait_times_out
         self.commands: list[list[str]] = []
 
     def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
         self.commands.append(list(args))
+        if "create" in args:
+            return self.create_exit_code
         if "wait" in args:
+            if self.wait_times_out:
+                raise subprocess.TimeoutExpired(list(args), timeout or 0)
             self._write_what_the_match_writes(Path(args[args.index("--file") + 1]).parent)
         return 0
 
@@ -307,3 +333,79 @@ def test_the_game_s_container_starts_a_client_for_each_seat(tmp_path: Path, matc
     for port in (5001, 5002):
         assert f"-listen 0.0.0.0 -port {port}" in script
     assert subprocess.run(["bash", "-n", "-c", script], check=False).returncode == 0
+
+
+def test_a_match_past_its_time_is_stopped_and_cleaned_up(tmp_path: Path, match: Match) -> None:
+    docker = FakeDocker(wait_times_out=True)
+    with pytest.raises(MatchTimeoutError):
+        engine_with(docker).play(match, output_folder=tmp_path / "out")
+    assert docker.subcommands() == ["create", "up", "wait", "logs", "down"]
+    assert not (tmp_path / "out" / ".work" / "bots").exists()
+
+
+def test_stopping_the_matches_kills_their_containers_and_refuses_later_matches(tmp_path: Path, match: Match) -> None:
+    class DockerPlayingUntilKilled(FakeDocker):
+        def __init__(self) -> None:
+            super().__init__(controller_result=_RESULT_OF_A_WIN)
+            self.waiting = threading.Event()
+            self.killed = threading.Event()
+
+        def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+            if list(args[6:]) == ["kill"]:
+                self.killed.set()
+            if "wait" in args:
+                self.waiting.set()
+                assert self.killed.wait(timeout=10)
+            return super().__call__(args, timeout=timeout, log_file=log_file)
+
+    docker = DockerPlayingUntilKilled()
+    engine = engine_with(docker)
+    stopped: list[MatchStoppedError] = []
+
+    def play() -> None:
+        try:
+            engine.play(match, output_folder=tmp_path / "out")
+        except MatchStoppedError as error:
+            stopped.append(error)
+
+    playing = threading.Thread(target=play)
+    playing.start()
+    assert docker.waiting.wait(timeout=10)
+    engine.stop_matches()
+    playing.join(timeout=10)
+    assert [str(error) for error in stopped] == ["The match was stopped while it was played"]
+    with pytest.raises(MatchStoppedError, match="before it began"):
+        engine.play(match, output_folder=tmp_path / "later")
+
+
+def test_the_containers_a_killed_match_left_are_removed_by_the_project_it_named(tmp_path: Path) -> None:
+    docker = FakeDocker()
+    project_file = tmp_path / "out" / ".work" / "compose-project"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text("sc2scala-0123456789ab\n", encoding="utf-8")
+    engine_with(docker).remove_leftovers(tmp_path / "out")
+    assert docker.commands == [
+        ["docker", "compose", "--project-name", "sc2scala-0123456789ab", "down", "--remove-orphans", "--timeout", "10"]
+    ]
+    assert not project_file.exists()
+
+
+def test_containers_that_were_not_created_are_cleaned_up(tmp_path: Path, match: Match) -> None:
+    docker = FakeDocker(create_exit_code=1)
+    with pytest.raises(EngineError, match="could not create"):
+        engine_with(docker).play(match, output_folder=tmp_path / "out")
+    assert docker.subcommands() == ["create", "logs", "down"]
+
+
+def test_a_slow_compose_logs_still_removes_the_containers(tmp_path: Path, match: Match) -> None:
+    class SlowLogsDocker(FakeDocker):
+        def __call__(self, args: Sequence[str], *, timeout: float | None, log_file: Path) -> int:
+            if "logs" in args:
+                self.commands.append(list(args))
+                raise subprocess.TimeoutExpired(list(args), timeout or 0)
+            return super().__call__(args, timeout=timeout, log_file=log_file)
+
+    docker = SlowLogsDocker(controller_result=_RESULT_OF_A_WIN)
+    result = engine_with(docker).play(match, output_folder=tmp_path / "out")
+    assert result.code == ResultCode.PLAYER_1_WIN
+    assert docker.subcommands()[-1] == "down"

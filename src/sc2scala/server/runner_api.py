@@ -142,7 +142,15 @@ def report_failure(session: DatabaseSession, machine: Machine, match_id: int, fa
 
 
 def match_for_runner(match: MatchRecord) -> dict[str, Any]:
-    """What a runner needs to play `match`: its bots' and map's files by their hashes, and its limits."""
+    """What a runner needs to play `match`: its bots' and map's files by their hashes, and its limits.
+
+    A limit that is off is left out, so that a runner of an earlier release, which knows no limit to be off, takes its
+    own default instead: AI Arena's engine passes the step-time limit on and applies it not, and a `None` written into
+    its config would break every match.
+    """
+    game_limits = {
+        name: value for name, value in asdict(GameLimits(**match.ladder.game_limits)).items() if value is not None
+    }
     races = (match.player_1_race, match.player_2_race)
     return {
         "id": match.id,
@@ -160,7 +168,7 @@ def match_for_runner(match: MatchRecord) -> dict[str, Any]:
             }
             for seat, (version, race) in enumerate(zip(match.versions, races, strict=True), start=1)
         ],
-        "game_limits": asdict(GameLimits(**match.ladder.game_limits)),
+        "game_limits": game_limits,
         "resource_limits": asdict(ResourceLimits(**match.ladder.resource_limits)),
     }
 

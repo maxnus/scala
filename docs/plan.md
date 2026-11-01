@@ -85,10 +85,12 @@ matches, ratings and name stay.
 ### Ladders
 
 A ladder is a name, an owner, an optional password, a map pool and the engine's limits: the game time, the time a bot
-may take for one step, and the real time a match may take. They default to those of AI Arena's local setup: 80640
-steps, an hour of game time; 40 ms, with ten strikes; and two hours. A game that reaches its game time ends as a tie.
-AI Arena's v0.8.0 engine reads the step-time limit but never applies it, so that until step 8a a bot may take up to
-the 30 seconds it allows any request. Anyone can create a ladder, and its owner may add
+may take for one step, and the real time a match may take. The game time and the real time default to those of AI
+Arena's local setup: 80640 steps, an hour of game time, and two hours. A game that reaches its game time ends as a
+tie. The step-time limit is off unless the ladder's owner sets one, a time and a number of strikes (the owner,
+2026-11-01, for step 8a): AI Arena's local setup writes 40 ms with ten strikes, but neither its v0.8.0 engine nor
+aiarena.net's applies them, so that a bot that plays there unchanged may take up to the 30 seconds they allow any
+request, and would lose here by a limit it never met. Anyone can create a ladder, and its owner may add
 [computer opponents](#computer-opponents) to it.
 
 Whoever gives a protected ladder's password once becomes a member. Members alone can enter bots, serve it with a
@@ -261,10 +263,10 @@ The match controller does what AI Arena's does, as its v0.8.0 source shows:
 - it reports the game's steps, and each bot's average step time, its own time between the game's answers and its next
   requests over the game's steps, as AI Arena's counts it.
 
-Beyond AI Arena's, it applies the ladder's step-time limit. A bot's step lasts from the game's answer to one step
-request to its next, less the time the game took meanwhile to answer its other requests; each step longer than
-`max_step_time_ms` is a strike, and a bot that reaches `step_time_strikes` loses by a time-out. The results stay those
-of the table above.
+Beyond AI Arena's, it applies a step-time limit, where the ladder sets one. A bot's step lasts from the game's answer
+to one step request to its next, less the time the game took meanwhile to answer its other requests; each step longer
+than `max_step_time_ms` is a strike, and a bot that reaches `step_time_strikes` loses by a time-out. The results stay
+those of the table above.
 
 The images are AI Arena's, at tags Scala pins; the bot environment's is Scala's choice, v0.8.0 as now or v0.9.0 as
 aiarena.net's, which step 8a settles by trying bots on both. The match controller runs from an image the runner pulls
@@ -416,10 +418,10 @@ Each step ends in something that runs, and is a pull request of its own.
      2026-11-01, set up by the command, and waits for the ladder's bots.
 8. **Scala's own engine, and computer opponents**, as [the engine](#the-engine) and
    [computer opponents](#computer-opponents) say, in three pull requests:
-   - 8a: Scala's engine playing bot against bot, with the step-time limit applied; tried with bots of every type in
-     `sc2scala play`. AI Arena's stays the default until 8c, and a runner plays with Scala's by `engine` in its
-     `runner.toml`, as max-9950 does on test-ladder; `runner pull` fetches the images of both, which the setup
-     script's check of free space allows for.
+   - 8a: Scala's engine playing bot against bot, with a ladder's step-time limit applied where it sets one, off by
+     default, and the ladder's pages to set it; tried with bots of every type in `sc2scala play`. AI Arena's stays
+     the default until 8c, and a runner plays with Scala's by `engine` in its `runner.toml`, as max-9950 does on
+     test-ladder; `runner pull` fetches the images of both, which the setup script's check of free space allows for.
    - 8b: computer opponents, on the server, its pages and the CLI, in the draw and the ratings, and in the engine.
    - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's
      machines; `runner pull`, the setup script and the guides then fetch only the images Scala's uses.

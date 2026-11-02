@@ -56,6 +56,10 @@ until the owner reverses it; **Design** is a proposal, to be changed in review; 
     each of a race, Terran, Zerg, Protoss or random, a difficulty, one of the game's ten, and a build, one of its
     five or random, and as many as its owner adds. A random race is the game's own, so that the bot is not told it,
     rather than one Scala rolls. Two computers never play each other.
+13. **A runner's owner controls it in the pages** (the owner, 2026-11-01, for step 9, rather than an app on the
+    machine): how many matches it plays at once, and pausing and resuming it, which until then took root on the
+    machine, an edit of `runner.toml` and a restart of its service. The machine keeps the most it may play, so that the
+    pages never ask more of it than its owner allows there. [Runners](#runners) says how.
 
 ## Design
 
@@ -183,40 +187,64 @@ Only a runner whose Scala plays computers draws a match with one: a runner names
 
 ### Runners
 
-A machine contributes runners: it plays as many matches at once as it has runners, each a thread of one
-`sc2scala runner start`, which runs as a service, systemd's on Linux and in WSL2, which runs systemd too. The ladders it
-serves are the server's to know, set by `sc2scala runner register`, `runner set` and the pages, and
-[the setup command](#adding-a-runner) does all of it in one. How many runners it has, how much disk its cache may take,
-and the weekly windows in which it plays, in its own time zone, are its own, in a file beside its token that `runner
-register` writes with the defaults:
+A machine contributes runners, each playing one match at a time in a thread of one `sc2scala runner start`, which runs
+as a service, systemd's on Linux and in WSL2, which runs systemd too. [The setup command](#adding-a-runner) registers
+it and starts the service. From then on its owner controls it in the pages, on their account page, or by
+`sc2scala runner set`, as decision 13 says, and needs root on the machine only to update or remove it:
+
+- **the ladders it serves**, as since step 6b;
+- **how many matches it plays at once**, up to the most the machine allows; 1 at first, since the machine may do other
+  work that its cores and memory do not show, and its owner raises it once they have seen a match played;
+- **pausing and resuming it**: paused, it takes no new match, and lets those it plays end;
+- **when it plays**: weekly windows in its own time zone, one a line, as `mon-fri 23:00-07:00` or `sat-sun`. A window
+  that crosses midnight belongs to the days it starts on, and with none, a machine plays at any hour.
+
+The server holds all four, and applies them when the runner asks for a match: it leases a machine no more matches at a
+time than its number, and none while it is paused or outside its windows. A change in the pages thus reaches the runner
+at its next ask, within the 30 s an idle runner waits between asks, with no restart; lowering the number, pausing, or a
+window closing lets the matches being played end, which the real-time limit bounds. Every answer, a match or none,
+carries the machine's number and whether it may play now, paused or outside its windows. The runner keeps as many
+workers as the machine allows, lets ask only as many as the number leaves free, and wakes the others when an answer
+frees more; with none free, one asks every 30 s for nothing but the answer, and a runner playing as many as it may
+still asks each minute, so that its page shows it seen. Each ask says:
+
+- **the matches the runner plays**, so that the server voids a lease the runner no longer plays, as when it was killed
+  in a match, rather than count it against the machine's number until its deadline. The runner asks one at a time, so
+  that an ask names every match it plays, and the server voids only a lease drawn before the runner's previous ask was
+  answered, so that a lease whose answer is still on its way is never voided;
+- **the machine's local time**, in which the server reads its windows, keeping the latest for the page; a machine that
+  never asked shows its windows without a next opening;
+- **the most it allows, its Scala and its engine**, which the page shows.
+
+What is the machine's alone stays in a file beside its token: the most matches it may play at once, one per 4 cores and
+8 GiB unless the file says otherwise, which a machine shared with other work lowers, how much disk its cache may take,
+and its engine until 8c removes the choice:
 
 ```toml
 # ~/.config/sc2scala/runner.toml
-runners = 4
+max_matches_at_once = 4
 cache_gib = 20
-
-[[window]]
-days = "mon-fri"
-from = "23:00"
-to = "07:00"
-
-[[window]]
-days = "sat-sun"
 ```
 
-A runner asks for a match only inside a window; one that crosses midnight belongs to the days it starts on, and with
-none, a runner plays at any hour. When a window closes, the runners take no new match and let those they play finish,
-which the real-time limit bounds, then wait for the next window to open. A match that is ready to start too late to end
-by its deadline, with 5 minutes to start and report, its bots slow to download say, is reported unplayed rather than
-started. `sc2scala runner stop`, or SIGTERM, as systemd sends, stops the runners once their matches end, and `--now`,
-SIGQUIT or a second Ctrl-C stops the matches too, which voids them. One `runner start` runs per user. Every connection
-goes out from the machine, so a runner needs no open port, behind a home router or in WSL2. The machine keeps the bot
-versions and maps it downloaded, by their hash, the least recently used going once they pass `cache_gib`, and the logs
-of the 10 latest matches it could not play or whose result the server did not take.
+The account page shows, for each machine, the matches it plays now, each linked to its page, or why it plays none:
+paused, outside its windows until the next opens, no match to play, or not seen for 5 minutes, five of the asks it
+makes at least each minute; and the most it allows, its Scala and its engine, as of its last ask. A runner of a release
+before step 9 names no matches when it asks; the server leaves it as it was, playing as many at once as its file's
+`runners` says, in its file's windows, until it is updated. An updated runner reads its file's `runners` no more from
+9a, and its windows no more from 9b, and says so as it starts. Only the owner's
+max-9950 runs a runner yet, 1 match at once at any hour, so every machine starts so on the server, and no file's
+settings are carried there.
 
-A match of light bots takes about 2.2 GB and 1.5 cores at its peak (step 1), so `runner register` suggests one runner
-per 4 cores and 8 GiB. A ladder's default limits let one match take up to 15 GiB: 4 for each bot, 6 for the game and 1
-for the match controller.
+A match that is ready to start too late to end by its deadline, with 5 minutes to start and report, its bots slow to
+download say, is reported unplayed rather than started. `sc2scala runner stop`, or SIGTERM, as systemd sends, stops the
+runners once their matches end, and `--now`, SIGQUIT or a second Ctrl-C stops the matches too, which voids them. One
+`runner start` runs per user. Every connection goes out from the machine, so a runner needs no open port, behind a home
+router or in WSL2. The machine keeps the bot versions and maps it downloaded, by their hash, the least recently used
+going once they pass `cache_gib`, and the logs of the 10 latest matches it could not play or whose result the server
+did not take.
+
+A match of light bots takes about 2.2 GB and 1.5 cores at its peak (step 1), hence one per 4 cores and 8 GiB. A
+ladder's default limits let one match take up to 15 GiB: 4 for each bot, 6 for the game and 1 for the match controller.
 
 The game client, the Linux StarCraft II 4.10, comes in AI Arena's `arenaclient-sc2` image, so a machine needs only
 x86-64 Linux, Docker Engine with Compose, and the app.
@@ -331,7 +359,7 @@ command does the rest.
      that the user may limit CPU, memory and processes; a failed check stops it;
    - installs uv and Scala for that user;
    - registers the machine by the setup code, under the machine's host name made a valid machine name, letters,
-     digits and '-', 40 at most, or under `--name`, with as many runners as the machine's cores and memory suggest;
+     digits and '-', 40 at most, or under `--name`, playing 1 match at once until its owner changes it in the pages;
    - downloads AI Arena's images, about 11 GB, showing its progress, and then starts the runner's service;
    - ends by naming the machine, its owner, the ladders it serves, and the page that shows it.
 
@@ -341,8 +369,8 @@ command does the rest.
    that the command in the shell's history works too. `--remove` removes the machine from the server, by its own
    token, and from the computer what the script made: the service, the user, and its Docker's images.
 
-3. **Afterwards**, everything is in the pages, as since step 6b: the ladders a machine serves, and removing it. Its
-   number of runners and its windows stay in `runner.toml`, as the guides say.
+3. **Afterwards**, everything is in the pages, as [runners](#runners) says: the ladders a machine serves, how many
+   matches it plays at once, pausing it, when it plays, and removing it.
 
 On the server, a setup code is kept as its hash, with its user, its ladders and when it expires. Since exchanging it
 for a machine takes no other token, it is as long and as random as a token, unlike a login request's code, which only
@@ -432,7 +460,7 @@ Each step ends in something that runs, and is a pull request of its own.
      nothing to a runner that played a match, against a server of the branch rather than the public one, and then
      updated and removed it. The guides, [the sandbox](sandbox.md) and [WSL2](wsl2.md), send people to the command,
      and keep the steps by hand for the rest. max-9950 itself serves test-ladder on the public server since
-     2026-11-01, set up by the command, and waits for the ladder's bots.
+     2026-11-01, set up by the command, and plays the ladder's bots, as 8c says.
 8. **Scala's own engine, and computer opponents**, as [the engine](#the-engine) and
    [computer opponents](#computer-opponents) say, in three pull requests:
    - 8a, built: Scala's engine playing bot against bot, with a ladder's step-time limit applied where it sets one, off
@@ -448,9 +476,22 @@ Each step ends in something that runs, and is a pull request of its own.
      standings and pairs; and `sc2scala play BOT Computer-...` plays one on a machine with no server. On Scala's
      engine, AI Arena's test bots lost to the computer of a random race, crashed, left and failed to connect as
      `tools/try_engines.py` expects, and NachOS's demo bot beat the easiest computer of a random race twice.
-   - 8c: AI Arena's engine removed, once Scala's has played test-ladder with bots of every type on the owner's machines;
-     `runner pull`, the setup script and the guides then fetch only the images Scala's uses, its bot environment moved
-     to v0.9.0, as [the engine](#the-engine) says.
+   - 8c: AI Arena's engine removed, now that Scala's has played test-ladder with bots of every type on the owner's
+     machine: AI Arena's test bots on python-sc2, Java, Node.js and a Linux binary, which the owner judged fine to play
+     for testing though they state no license, and 8a's .NET bot and NachOS's demo bot, against each other and three
+     computers of random race, very easy, medium and hard: 116 matches drawn on 2026-11-01, none void. `runner
+     pull`, the setup script and the guides then fetch only the images Scala's uses, its bot environment moved to
+     v0.9.0, as [the engine](#the-engine) says.
+9. **A runner's controls in the pages**, as decision 13 and [runners](#runners) say, in two pull requests, apart from
+   8c, before or after it:
+   - 9a: how many matches a machine plays at once, pausing and resuming it, and what it plays now, on the account page
+     and by `sc2scala runner set` and `runner list`; the server leasing it no more matches than its number, and voiding
+     the leases its runner no longer plays; the runner naming its matches, the most it allows, its Scala and its
+     engine when it asks, and following a change with no restart; `max_matches_at_once` in `runner.toml`, where its
+     windows stay until 9b; and the README and the guides, [WSL2](wsl2.md)'s among them, sending people to the page
+     rather than to the file. Tried on max-9950 while it plays test-ladder: its number raised and lowered, and it paused
+     and resumed, from the page.
+   - 9b: its windows in the pages too, read by the server in the machine's local time, which each ask gives.
 
 ## Open
 
@@ -458,9 +499,8 @@ Each step ends in something that runs, and is a pull request of its own.
   engine is written to the behavior AI Arena's source and its bots show, not translated from that code. It is needed
   before Scala goes on PyPI, from which strangers' runners install it.
 - **Updating runners**: running the setup command again updates one. The server could tell a runner that its Scala is
-  too old for it, once a change needs every runner updated; step 8b's runner naming its engine is a start.
-- **Which bots play test-ladder** before step 8c, one of each type, whose licenses let a runner play them: AI Arena's
-  test bots, which step 8a tried, state no license.
+  too old for it, once a change needs every runner updated; step 8b's runner naming its engine is a start, and step
+  9's naming its Scala another.
 - **A random computer's race**, read from the replay once the match is over, for the match's page.
 - **Other Linux distributions** for the setup script, once someone asks. Debian 13 should take it, where Debian 12's
   packages hold no Compose 2.20, which the engine needs; Fedora and Arch have rootless Docker too.

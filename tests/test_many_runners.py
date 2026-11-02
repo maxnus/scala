@@ -105,6 +105,19 @@ def test_a_paused_runner_plays_its_match_to_the_end_and_takes_no_other(ladder: L
     assert (machine["paused"], machine["idle_because"]) == (True, "paused")
 
 
+def test_a_runner_whose_matches_cannot_be_played_waits_between_them_rather_than_drawing_match_after_match(
+    ladder: LadderWithBots, tmp_path: Path
+) -> None:
+    runner = runner_of(ladder, FakeEngine(error=EngineError("Docker is not running")), tmp_path, max_matches_at_once=2)
+    stopping = threading.Timer(0.5, runner.stop)
+    stopping.start()
+    runner.run(poll_seconds=0.25)
+    stopping.join()
+    played = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
+    assert 1 <= len(played) <= 6, "each worker waits 0.25 s after a match it could not play"
+    assert {match["status"] for match in played} == {"void"}
+
+
 class CountingClient:
     """Stands in for the server's client, with nothing to play, keeping each ask."""
 

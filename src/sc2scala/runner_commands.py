@@ -418,6 +418,7 @@ def _described(machine: dict[str, Any]) -> str:
     when it was last seen."""
     playing = machine.get("playing") or []
     now = f"plays {', '.join(f'match {match}' for match in playing)}" if playing else machine.get("idle_because")
+    now = f"{now}; " if now else ""
     allowed = machine.get("max_matches_at_once")
     at_once = f"{_matches(machine.get('matches_at_once', 1))} at once" + (f" of {allowed} allowed" if allowed else "")
     if machine.get("paused") and now != "paused":
@@ -426,7 +427,7 @@ def _described(machine: dict[str, Any]) -> str:
         at_once += " (its runner predates these settings)"
     barred = f", barred from {', '.join(machine['barred_from'])}" if machine.get("barred_from") else ""
     seen = machine.get("last_seen_at") or "never"
-    return f"{machine['name']}: {now}; {at_once}; {_serving(machine)}{barred}; last seen {seen}"
+    return f"{machine['name']}: {now}{at_once}; {_serving(machine)}{barred}; last seen {seen}"
 
 
 def _most_matches_at_once(config: RunnerConfig) -> int:

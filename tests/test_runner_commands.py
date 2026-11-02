@@ -55,6 +55,22 @@ def test_runner_register_writes_the_machines_settings_once(
     assert config_file.read_text(encoding="utf-8") == "max_matches_at_once = 3\n"
 
 
+def test_runner_start_says_that_runners_in_its_file_is_read_no_more(
+    registered: LadderWithBots, folders: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folders / "xdg_config_home" / "sc2scala" / "runner.toml").write_text("runners = 4\n", encoding="utf-8")
+
+    class NotRunning(Runner):
+        def run(self, **options: object) -> None:
+            pass
+
+    monkeypatch.setattr("sc2scala.runner_commands.Runner", NotRunning)
+    assert main(["runner", "start"], http=registered.server, engine=FakeEngine()) == 0
+    assert (
+        "runner.toml's runners = 4 is read no more: http://localhost/account sets how many" in capsys.readouterr().err
+    )
+
+
 def test_runner_start_is_refused_while_a_runner_runs(
     registered: LadderWithBots, folders: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

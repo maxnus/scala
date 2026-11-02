@@ -98,7 +98,9 @@ class Runner:
         One thread asks for them, one ask at a time, so that each ask names every match being played; it asks again at
         once while the server's answer leaves a match free, when a match ends, and else after `poll_seconds`, outside
         the windows of `schedule` too, for none, so that the server sees the machine and the runner follows a change of
-        its settings. Each of `max_matches_at_once` workers plays the matches handed to it.
+        its settings. Each of `max_matches_at_once` workers plays the matches handed to it, and after one that could not
+        be played, or whose result the server did not take, keeps its place for `poll_seconds`, so that a runner that
+        cannot play, its Docker down say, does not draw match after match.
 
         First removes what matches cut short left, as `remove_leftovers` does. Raises `ScalaError` if a thread failed in
         a way it did not foresee, once the others have stopped, which it asks them to.
@@ -107,7 +109,7 @@ class Runner:
         failures: list[Exception] = []
         offered: queue.SimpleQueue[dict[str, Any] | None] = queue.SimpleQueue()
         workers = [
-            threading.Thread(target=self._work, args=(offered, failures), name=f"runner-{number}")
+            threading.Thread(target=self._work, args=(offered, poll_seconds, failures), name=f"runner-{number}")
             for number in range(1, self.max_matches_at_once + 1)
         ]
         asking = threading.Thread(
@@ -213,7 +215,7 @@ class Runner:
             return
         allowed = f"; it asks for {matches_at_once}, but this machine allows {self.max_matches_at_once}"
         logger.info(
-            f"Plays up to {_matches(settings[0])} at once, as the server says"
+            f"Plays up to {settings[0]} {'match' if settings[0] == 1 else 'matches'} at once, as the server says"
             + (allowed if matches_at_once > self.max_matches_at_once else "")
         )
 
@@ -222,15 +224,19 @@ class Runner:
         with self._lock:
             return self._settings is not None and not self._settings[1] and len(self._playing) < self._settings[0]
 
-    def _work(self, offered: queue.SimpleQueue[dict[str, Any] | None], failures: list[Exception]) -> None:
-        """One worker's matches, played one after the other as they are handed to it, until it is told to stop.
+    def _work(
+        self, offered: queue.SimpleQueue[dict[str, Any] | None], poll_seconds: float, failures: list[Exception]
+    ) -> None:
+        """One worker's matches, played one after the other as they are handed to it, until it is told to stop; after
+        a match whose result the server did not take, it waits `poll_seconds`, or until the runner stops.
 
         A failure it did not foresee stops the runner, and the worker goes on taking what it is handed, each reported
         unplayed since the runner is stopping, so that no match handed over is left leased.
         """
         while (match := offered.get()) is not None:
+            reported = False
             try:
-                self._play_in_its_folder(match)
+                reported = self._play_in_its_folder(match)
             except ServerError as error:
                 logger.error(f"Match {match['id']}: telling the server it could not be played failed: {error}")
             except Exception as error:
@@ -238,6 +244,8 @@ class Runner:
                 failures.append(error)
                 self.stop()
             finally:
+                if not reported:
+                    self._stopping.wait(poll_seconds)
                 self._played(match)
 
     def _played(self, match: dict[str, Any]) -> None:
@@ -410,10 +418,6 @@ class Runner:
                 return
             self._last_note = message
         logger.info(message)
-
-
-def _matches(count: int) -> str:
-    return f"{count} {'match' if count == 1 else 'matches'}"
 
 
 def _computer_from(player: dict[str, Any]) -> Computer:

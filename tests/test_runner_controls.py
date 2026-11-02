@@ -142,11 +142,18 @@ def test_a_lease_whose_answer_may_still_be_on_its_way_stays(ladder: LadderWithBo
 
 
 def test_a_runner_before_step_9_is_left_as_it_was(ladder: LadderWithBots) -> None:
+    ask(ladder, playing=[], next_window_opens="2026-11-03T23:00:00")
+    assert desk(ladder)["follows_its_controls"] is True
     set_desk(ladder, paused=True)
     first, second = draw(ladder.server, ladder.runner), draw(ladder.server, ladder.runner)
     assert first is not None and second is not None, "it plays as many at once as its own file says, unpaused"
     machine = desk(ladder)
     assert (machine["follows_its_controls"], machine["playing"]) == (False, [first["id"], second["id"]])
+
+
+def test_an_ask_naming_more_matches_than_a_machine_may_play_is_refused(ladder: LadderWithBots) -> None:
+    asked = {"engine": "scala", "playing": list(range(101)), "max_matches_at_once": 7, "scala_version": "0.1.0"}
+    assert ladder.server.post("/api/runner/ask", headers=ladder.runner, json=asked).status_code == 422
 
 
 def test_a_machine_never_seen_or_not_seen_lately_says_so(ladder: LadderWithBots) -> None:

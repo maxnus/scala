@@ -70,7 +70,7 @@ class Ask(BaseModel):
     """What a runner says each time it asks for a match, from step 9 on."""
 
     engine: str = Field(max_length=20)
-    playing: list[int]
+    playing: list[int] = Field(max_length=MOST_MATCHES_AT_ONCE)
     """The matches it plays, each of them, since it asks one at a time."""
     max_matches_at_once: int = Field(ge=1, le=MOST_MATCHES_AT_ONCE)
     """The most it may play at once, as its machine allows."""
@@ -122,10 +122,12 @@ def next_match(
     """For a runner of a release before step 9: a match drawn for the machine and leased to it, or 204 if no ladder it
     serves has a pair that may play; a match against the computer only if the engine it names plays one.
 
-    Such a runner plays as many at once as its own file says, and is not paused.
+    Such a runner plays as many at once as its own file says, and is not paused; the machine no longer reads as
+    following its owner's settings, should a runner of step 9 have asked for it before.
     """
     now = utc_now()
     void_expired_leases(session, now=now)
+    machine.scala_version = None
     match = _drawn_for(request, session, machine, now=now, engine=asked.engine if asked is not None else None)
     session.commit()
     if match is None:

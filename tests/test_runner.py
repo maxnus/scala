@@ -5,6 +5,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -208,6 +209,28 @@ def test_a_runner_waits_and_asks_again_when_the_server_cannot_be_reached(tmp_pat
     assert client.asks == 3
     with pytest.raises(ServerError):
         Runner(UnreachableAtFirst(), FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path).play_next()  # type: ignore[arg-type]
+
+
+def test_a_runner_asking_a_server_before_step_9_is_told_that_it_needs_updating() -> None:
+    older_server = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404, json={})))
+    client = ScalaClient("http://localhost", "scala_runner_token", http=older_server)
+    with pytest.raises(ServerError, match="is of a release before runners ask at /api/runner/ask: it needs updating"):
+        client.ask(engine="scala", playing=[], max_matches_at_once=1, scala_version="0.1.0", next_window_opens=None)
+
+
+def test_runner_list_leaves_out_what_a_server_before_step_9_does_not_say(
+    folders: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    machine = {"name": "desk", "serves_public": True, "ladders": [], "barred_from": [], "last_seen_at": None}
+
+    def older_server(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"login": "alice"} if request.url.path == "/api/me" else [machine])
+
+    http = httpx.Client(transport=httpx.MockTransport(older_server))
+    main(["login", "http://localhost", "--token", "scala_token"], http=http)
+    capsys.readouterr()
+    assert main(["runner", "list"], http=http) == 0
+    assert capsys.readouterr().out == "desk: 1 match at once; serves every public ladder; last seen never\n"
 
 
 def test_runner_set_changes_what_it_is_given_alone(

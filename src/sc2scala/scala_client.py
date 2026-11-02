@@ -217,7 +217,16 @@ class ScalaClient:
             "scala_version": scala_version,
             "next_window_opens": next_window_opens.isoformat(timespec="minutes") if next_window_opens else None,
         }
-        return self._request("POST", "/api/runner/ask", json=asked)
+        try:
+            return self._request("POST", "/api/runner/ask", json=asked)
+        except ServerError as error:
+            if error.status_code != 404:
+                raise
+            raise ServerError(
+                f"{self.server_url} is of a release before runners ask at /api/runner/ask: it needs updating "
+                "before this runner can play",
+                status_code=404,
+            ) from error
 
     def download(self, kind: str, sha256: str, destination: Path) -> None:
         """Downloads the runner's file of `kind`, `bots` or `maps`, to `destination`, and checks its SHA-256.

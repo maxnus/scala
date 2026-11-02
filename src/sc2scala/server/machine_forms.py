@@ -64,8 +64,8 @@ def set_matches_at_once(
     return redirect_with_notice(
         request,
         _ACCOUNT_PAGE,
-        f"{machine.name} plays up to {_matches(machine.matches_at_once)} at once from its runner's next ask, within "
-        "30 s",
+        f"{machine.name} plays up to {number} {'match' if number == 1 else 'matches'} at once from its runner's next "
+        "ask, within 30 s",
     )
 
 
@@ -110,7 +110,3 @@ def remove_machine(
     except HTTPException as error:
         return redirect_with_notice(request, _ACCOUNT_PAGE, refusal_reason(error), refused=True)
     return redirect_with_notice(request, _ACCOUNT_PAGE, f"Removed {name}; the matches it was playing are void")
-
-
-def _matches(count: int) -> str:
-    return f"{count} {'match' if count == 1 else 'matches'}"

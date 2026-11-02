@@ -32,6 +32,14 @@ def test_a_runner_token_is_shown_once_and_names_its_machine(server: TestClient) 
             "ladders": [],
             "barred_from": [],
             "last_seen_at": None,
+            "matches_at_once": 1,
+            "paused": False,
+            "max_matches_at_once": None,
+            "follows_its_controls": False,
+            "scala_version": None,
+            "engine": None,
+            "playing": [],
+            "idle_because": "never seen",
         }
     ]
     assert server.post("/api/runners", headers=alice, json={"name": "desk"}).status_code == 409

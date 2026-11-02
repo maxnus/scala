@@ -1,4 +1,5 @@
-"""The forms of a runner machine's owner on their page: which ladders it serves, and removing it.
+"""The forms of a runner machine's owner on their page: how many matches it plays at once, pausing and resuming it,
+which ladders it serves, and removing it.
 
 Registering a machine happens on the machine, where its token is kept: by a setup code from the Add a runner page,
 which `runner_setup` makes, or by `sc2scala runner register` signed in.
@@ -37,6 +38,65 @@ def change_machine(
         return redirect_with_notice(request, _ACCOUNT_PAGE, refusal_reason(error), refused=True)
     serves = [*(["every public ladder"] if machine.serves_public else []), *(ladder.name for ladder in machine.ladders)]
     return redirect_with_notice(request, _ACCOUNT_PAGE, f"{machine.name} serves {', '.join(serves) or 'no ladder'}")
+
+
+@router.post("/account/machines/{name}/matches-at-once")
+def set_matches_at_once(
+    request: Request,
+    session: DatabaseSession,
+    user: SignedInUser,
+    name: str,
+    csrf_token: Annotated[str, Form()],
+    matches_at_once: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Sets how many matches the user's machine plays at once, which its runner follows within 30 s."""
+    check_csrf(request, csrf_token)
+    try:
+        number = int(matches_at_once)
+    except ValueError:
+        return redirect_with_notice(
+            request, _ACCOUNT_PAGE, f"Matches at once is a whole number, not {matches_at_once!r}", refused=True
+        )
+    try:
+        machine = change_machine_settings(session, user, name, matches_at_once=number)
+    except HTTPException as error:
+        return redirect_with_notice(request, _ACCOUNT_PAGE, refusal_reason(error), refused=True)
+    return redirect_with_notice(
+        request,
+        _ACCOUNT_PAGE,
+        f"{machine.name} plays up to {number} {'match' if number == 1 else 'matches'} at once from its runner's next "
+        "ask, within 30 s",
+    )
+
+
+@router.post("/account/machines/{name}/pause")
+def pause_machine(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, csrf_token: Annotated[str, Form()]
+) -> RedirectResponse:
+    """Pauses the user's machine: it takes no new match, and plays those it plays to their end."""
+    check_csrf(request, csrf_token)
+    try:
+        machine = change_machine_settings(session, user, name, paused=True)
+    except HTTPException as error:
+        return redirect_with_notice(request, _ACCOUNT_PAGE, refusal_reason(error), refused=True)
+    return redirect_with_notice(
+        request, _ACCOUNT_PAGE, f"Paused {machine.name}: it takes no new match, and plays those it plays to their end"
+    )
+
+
+@router.post("/account/machines/{name}/resume")
+def resume_machine(
+    request: Request, session: DatabaseSession, user: SignedInUser, name: str, csrf_token: Annotated[str, Form()]
+) -> RedirectResponse:
+    """Resumes the user's machine, which takes matches again from its runner's next ask."""
+    check_csrf(request, csrf_token)
+    try:
+        machine = change_machine_settings(session, user, name, paused=False)
+    except HTTPException as error:
+        return redirect_with_notice(request, _ACCOUNT_PAGE, refusal_reason(error), refused=True)
+    return redirect_with_notice(
+        request, _ACCOUNT_PAGE, f"Resumed {machine.name}: it takes matches again from its runner's next ask, in 30 s"
+    )
 
 
 @router.post("/account/machines/{name}/remove")

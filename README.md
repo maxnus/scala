@@ -26,8 +26,8 @@ On a server's pages, once signed in:
   if it never drew a match, or else retires it: it draws no more, and keeps its standings, matches and name. Its
   runners page lists the machines that played its matches, where you may bar one: it then plays none of them, and the
   results it reported are void, unless you keep them.
-- **Your page:** your bots, your runner machines and which ladders each serves, and the tokens your command line and
-  runners act with.
+- **Your page:** your bots; your runner machines, what each plays now, how many matches it plays at once, pausing and
+  resuming it, and which ladders it serves; and the tokens your command line and runners act with.
 
 ## Contributing a runner
 
@@ -65,14 +65,19 @@ the server's page in your browser, where you sign in and confirm the same code; 
 shows the page's address for you to open elsewhere. A computer is one machine: `sc2scala runner remove`, with no name,
 removes it from the server, by its own token, before it registers anew.
 
-`runner register` writes the machine's settings to `~/.config/sc2scala/runner.toml`: how many matches it plays at
-once, 1 at first, with how many fit
-this machine in a comment; how many GiB of bots and maps it keeps, 20; and the weekly windows in which it plays, at any
-hour at first, with an example of nights and weekends. `engine = "scala"` there makes it play with Scala's own engine,
-which is being tried, rather than AI Arena's. `runner start` reads them, downloads the engine's images first if Docker
-lacks them, about 11 GB, and plays. It keeps bots and maps in `~/.cache/sc2scala`, plays each match in
-`~/.local/share/sc2scala/work`, and reports its result, replay and logs. `sc2scala runner stop`, or Ctrl-C, stops it
-once the matches being played end; `runner stop --now`, or a second Ctrl-C, stops them too, which voids them.
+How many matches a machine plays at once, 1 at first, and pausing and resuming it, are on your page, or `sc2scala
+runner set NAME --matches-at-once N`, `--pause` and `--resume`. Its runner follows at its next ask, within 30 s, with no
+restart, and a lower number or a pause lets the matches being played end. Your page and `sc2scala runner list` show
+what each machine plays now, or why it plays nothing: paused, outside its windows, no match to play, or not seen lately.
+
+`runner register` writes what is the machine's alone to `~/.config/sc2scala/runner.toml`: the most matches it may play
+at once, whatever its page asks, by default one per 4 cores and 8 GiB of the machine, which `max_matches_at_once` there
+lowers for a machine that does other work; how many GiB of bots and maps it keeps, 20; and the weekly windows in which
+it plays, at any hour at first, with an example of nights and weekends. `engine = "scala"` there makes it play with
+Scala's own engine, which is being tried, rather than AI Arena's. `runner start` reads them, downloads the engine's
+images first if Docker lacks them, about 11 GB, and plays. It keeps bots and maps in `~/.cache/sc2scala`, plays each
+match in `~/.local/share/sc2scala/work`, and reports its result, replay and logs. `sc2scala runner stop`, or Ctrl-C,
+stops it once the matches being played end; `runner stop --now`, or a second Ctrl-C, stops them too, which voids them.
 
 `runner service` writes a systemd user service that runs `runner start` with this shell's `PATH` and folders, restarts
 it if it fails, and stops it as `runner stop` does:

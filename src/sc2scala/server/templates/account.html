@@ -48,11 +48,34 @@
   <p><a class="button" href="/runners/add">Add a runner</a></p>
   {% if machines %}
     <table>
-      <thead><tr><th>Machine</th><th>Serves</th><th>Last seen</th></tr></thead>
+      <thead><tr><th>Machine</th><th>Now</th><th>Matches at once</th><th>Serves</th><th>Last seen</th></tr></thead>
       <tbody>
         {% for machine in machines %}
+          {% set status = statuses[machine.id] %}
           <tr>
-            <td>{{ machine.name }}</td>
+            <td>{{ machine.name }}{% if machine.scala_version %}<div class="note">Scala {{ machine.scala_version }}{% if machine.engine %}, {{ engine_titles.get(machine.engine, machine.engine) }}{% endif %}</div>{% endif %}</td>
+            <td>
+              {% if status.playing %}
+                {% for match in status.playing %}<a href="/matches/{{ match.id }}">match {{ match.id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if machine.paused and machine.follows_its_controls %}; paused{% endif %}
+              {% else %}
+                {{ status.idle_because }}
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" action="/account/machines/{{ machine.name }}/matches-at-once" class="row compact">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="number" name="matches_at_once" min="1" max="{{ machine.max_matches_at_once or most_matches_at_once }}" value="{{ machine.matches_at_once }}" required aria-label="Matches {{ machine.name }} plays at once">
+                <button type="submit" class="secondary">Set</button>
+              </form>
+              {% if machine.max_matches_at_once %}<div class="note">of {{ machine.max_matches_at_once }} it allows</div>{% endif %}
+              <form method="post" action="/account/machines/{{ machine.name }}/{{ 'resume' if machine.paused else 'pause' }}" class="row compact">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="secondary">{{ "Resume" if machine.paused else "Pause" }}</button>
+              </form>
+              {% if machine.last_seen_at and not machine.follows_its_controls %}
+                <div class="note">Its runner predates these settings, and plays as its runner.toml says until it is updated.</div>
+              {% endif %}
+            </td>
             <td>
               {% if machine.serves_public %}every public ladder{% if machine.ladders %}, and {% endif %}{% endif %}{% for ladder in machine.ladders %}<a href="/ladders/{{ ladder.name }}">{{ ladder.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if not machine.serves_public and not machine.ladders %}no ladder{% endif %}{% if barred_from[machine.id] %}; barred from {{ barred_from[machine.id] | join(", ") }}{% endif %}
               <details class="machine">

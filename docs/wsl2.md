@@ -68,17 +68,18 @@ processors=12
 instanceIdleTimeout=-1
 ```
 
-The figures are an example: `sc2scala runner register` suggests one runner per 4 cores and 8 GiB of what WSL is given,
-so these fit 3. `instanceIdleTimeout=-1` keeps WSL from stopping the distribution 15 seconds after its last window
-closes, and the virtual machine stops only once no distribution runs. Run `wsl --shutdown` for the file to take effect;
-it stops the runner too, and voids the matches it was playing.
+The figures are an example: the runner allows one match at once per 4 cores and 8 GiB of what WSL is given, so these
+allow 3; it plays 1 at first, and your page on the server raises it. `instanceIdleTimeout=-1` keeps WSL from stopping
+the distribution 15 seconds after its last window closes, and the virtual machine stops only once no distribution runs.
+Run `wsl --shutdown` for the file to take effect; it stops the runner too, and voids the matches it was playing.
 
 ## 4. Set up the runner
 
 In Ubuntu, run the command that the server's *Add a runner* page gives, opened in the Windows browser, as the
 [README](../README.md#contributing-a-runner) says. It installs Docker and what rootless Docker needs, makes the user
 `sc2scala` with rootless Docker, registers the machine, under the computer's name, and starts the runner as that user's
-service, which runs whenever the distribution does. Docker Desktop is not needed: if it is installed, first turn off
+service, which runs whenever the distribution does, 1 match at once until your page on the server says more, where
+you pause it too. Docker Desktop is not needed: if it is installed, first turn off
 its WSL integration for Ubuntu-24.04, in its Settings > Resources > WSL integration, so that its `docker` does not take
 the place of the distribution's own. The runner's log is `sudo journalctl _SYSTEMD_USER_UNIT=sc2scala-runner.service
 --follow`.
@@ -103,11 +104,12 @@ are logged on; one that starts at boot, with nobody logged on, is not covered he
 
 ## 6. Mind sleep and updates
 
-While Windows sleeps, the runner pauses, and a match it was playing is void if it cannot report by its deadline, the
+While Windows sleeps, the runner sleeps with it, and a match it was playing is void if it cannot report by its deadline, the
 ladder's real-time limit and 15 minutes after the match was drawn; the next match is drawn afresh, so nothing is lost
-but that match. Set the runner's windows in `runner.toml` to the hours the machine is awake, or keep it from sleeping
-then, in Settings > System > Power, or Power & battery on a laptop. A restart for Windows Update stops the runner and
-voids its matches, and the task of step 5 starts it again at the next logon.
+but that match. Set the runner's windows in `runner.toml` to the hours the machine is awake, pause it on your page
+before the machine sleeps, which lets its matches end, or keep it from sleeping then, in Settings > System > Power, or
+Power & battery on a laptop. A restart for Windows Update stops the runner and voids its matches, and the task of step 5
+starts it again at the next logon.
 
 ## By hand
 

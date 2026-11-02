@@ -42,14 +42,33 @@ def test_runner_register_writes_the_machines_settings_once(
     registered: LadderWithBots, folders: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config_file = folders / "xdg_config_home" / "sc2scala" / "runner.toml"
-    assert "runners = 1" in config_file.read_text(encoding="utf-8")
-    config_file.write_text("runners = 3\n", encoding="utf-8")
+    assert "\n# max_matches_at_once = " in config_file.read_text(encoding="utf-8")
+    config_file.write_text("max_matches_at_once = 3\n", encoding="utf-8")
     assert main(["runner", "register", "study"], http=registered.server) == 1, "this computer is laptop already"
     assert main(["runner", "remove"], http=registered.server) == 0
     capsys.readouterr()
     main(["runner", "register", "study"], http=registered.server)
-    assert f"It plays 3 matches at once, at any hour, as {config_file} says" in capsys.readouterr().out
-    assert config_file.read_text(encoding="utf-8") == "runners = 3\n"
+    assert (
+        f"It plays 1 match at once, up to 3 as {config_file} allows, at any hour; http://localhost/account and "
+        "`sc2scala runner set` change how many, and pause it"
+    ) in capsys.readouterr().out
+    assert config_file.read_text(encoding="utf-8") == "max_matches_at_once = 3\n"
+
+
+def test_runner_start_says_that_runners_in_its_file_is_read_no_more(
+    registered: LadderWithBots, folders: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folders / "xdg_config_home" / "sc2scala" / "runner.toml").write_text("runners = 4\n", encoding="utf-8")
+
+    class NotRunning(Runner):
+        def run(self, **options: object) -> None:
+            pass
+
+    monkeypatch.setattr("sc2scala.runner_commands.Runner", NotRunning)
+    assert main(["runner", "start"], http=registered.server, engine=FakeEngine()) == 0
+    assert (
+        "runner.toml's runners = 4 is read no more: http://localhost/account sets how many" in capsys.readouterr().err
+    )
 
 
 def test_runner_start_is_refused_while_a_runner_runs(

@@ -304,8 +304,8 @@ summary() {
 	local machine
 	machine="$(as_runner python3 -c 'import json; print(json.load(open(".config/sc2scala/runner.json"))["machine"])')"
 	say "Done: this computer is the runner machine $machine of $SCALA_SERVER"
-	note "Its ladders, and removing it: $SCALA_SERVER/account"
-	note "How many matches it plays at once, and when: $(runner_home)/.config/sc2scala/runner.toml, then"
+	note "How many matches it plays at once, 1 at first, pausing it, its ladders, and removing it: $SCALA_SERVER/account"
+	note "The most matches it may play at once, and when it plays: $(runner_home)/.config/sc2scala/runner.toml, then"
 	note "  sudo -iu $RUNNER_USER XDG_RUNTIME_DIR=/run/user/$(runner_uid) systemctl --user restart $SERVICE"
 	note "Its log: sudo journalctl _SYSTEMD_USER_UNIT=$SERVICE.service --follow"
 }

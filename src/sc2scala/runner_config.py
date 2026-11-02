@@ -1,6 +1,7 @@
-"""How a runner machine runs: how many matches it plays at once, how much disk its cache may take, and when it plays.
+"""How a runner machine runs: the most matches it may play at once, how much disk its cache may take, and when it plays.
 
-Read from `runner.toml` beside the CLI's credentials, which `sc2scala runner register` writes with its defaults.
+Read from `runner.toml` beside the CLI's credentials, which `sc2scala runner register` writes with its defaults. How
+many matches it plays at once, up to its most, and pausing it, are its owner's to set on the server.
 """
 
 import math
@@ -19,9 +20,11 @@ _CONFIG_FILE_NAME = "runner.toml"
 _DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _MINUTES_PER_DAY = 24 * 60
 _GIBIBYTE = 1024**3
-_CORES_PER_RUNNER = 4
-_MEMORY_GIB_PER_RUNNER = 8
+_CORES_PER_MATCH = 4
+_MEMORY_GIB_PER_MATCH = 8
 DEFAULT_CACHE_GIB = 20
+MOST_MATCHES_AT_ONCE = 100
+"""The most matches a machine may allow at once, or its owner set it to play."""
 
 
 class RunnerConfigError(ScalaError):
@@ -81,13 +84,18 @@ ANY_HOUR = PlayingSchedule()
 
 @dataclass(frozen=True)
 class RunnerConfig:
-    """How many matches a machine plays at once, how many GiB of bots and maps it keeps, when it plays, and with which
-    engine, one of `ENGINE_NAMES`."""
+    """The most matches a machine may play at once, `None` for as many as suggested for its cores and memory; how many
+    GiB of bots and maps it keeps; when it plays; and with which engine, one of `ENGINE_NAMES`.
 
-    runners: int = 1
+    `runners`, how many it played at once before step 9 moved the number to the server, is kept only to say that it is
+    read no more.
+    """
+
+    max_matches_at_once: int | None = None
     cache_gib: float = DEFAULT_CACHE_GIB
     schedule: PlayingSchedule = ANY_HOUR
     engine: str = DEFAULT_ENGINE
+    runners: int | None = None
 
     @property
     def cache_bytes(self) -> int:
@@ -114,9 +122,18 @@ class RunnerConfig:
 
     @classmethod
     def _from_toml(cls, content: dict[str, Any]) -> "RunnerConfig":
-        _refuse_unknown(content, {"runners", "cache_gib", "window", "engine"}, "setting")
-        runners = content.get("runners", 1)
-        if not isinstance(runners, int) or isinstance(runners, bool) or runners < 1:
+        _refuse_unknown(content, {"max_matches_at_once", "runners", "cache_gib", "window", "engine"}, "setting")
+        max_matches_at_once = content.get("max_matches_at_once")
+        if max_matches_at_once is not None and not (
+            isinstance(max_matches_at_once, int)
+            and not isinstance(max_matches_at_once, bool)
+            and 1 <= max_matches_at_once <= MOST_MATCHES_AT_ONCE
+        ):
+            raise RunnerConfigError(
+                f"max_matches_at_once is a whole number from 1 to {MOST_MATCHES_AT_ONCE}, not {max_matches_at_once!r}"
+            )
+        runners = content.get("runners")
+        if runners is not None and (not isinstance(runners, int) or isinstance(runners, bool) or runners < 1):
             raise RunnerConfigError(f"runners is a whole number of 1 or more, not {runners!r}")
         cache_gib = content.get("cache_gib", DEFAULT_CACHE_GIB)
         if (
@@ -133,10 +150,11 @@ class RunnerConfig:
         if engine not in ENGINE_NAMES:
             raise RunnerConfigError(f"engine is one of {', '.join(map(repr, ENGINE_NAMES))}, not {engine!r}")
         return cls(
-            runners=runners,
+            max_matches_at_once=max_matches_at_once,
             cache_gib=cache_gib,
             schedule=PlayingSchedule(tuple(_window_from(window) for window in windows)),
             engine=engine,
+            runners=runners,
         )
 
 
@@ -144,24 +162,29 @@ def default_runner_config_file() -> Path:
     return default_credentials_file().with_name(_CONFIG_FILE_NAME)
 
 
-def suggested_runners(*, cores: int, memory_bytes: int) -> int:
+def suggested_matches_at_once(*, cores: int, memory_bytes: int) -> int:
     """How many matches a machine of `cores` and `memory_bytes` plays at once with room to spare: one per 4 cores and
-    8 GiB, from step 1's measurements, a match of light bots taking about 2.2 GB and 1.5 cores at its peak."""
-    return max(1, min(cores // _CORES_PER_RUNNER, memory_bytes // (_MEMORY_GIB_PER_RUNNER * _GIBIBYTE)))
+    8 GiB, from step 1's measurements, a match of light bots taking about 2.2 GB and 1.5 cores at its peak; at most
+    `MOST_MATCHES_AT_ONCE`."""
+    fitting = min(cores // _CORES_PER_MATCH, memory_bytes // (_MEMORY_GIB_PER_MATCH * _GIBIBYTE))
+    return max(1, min(fitting, MOST_MATCHES_AT_ONCE))
 
 
 def default_config_text(*, cores: int, memory_bytes: int) -> str:
     """The config file `sc2scala runner register` writes, with the defaults, for a machine of `cores` and
     `memory_bytes`."""
     memory_gib = memory_bytes / _GIBIBYTE
-    suggested = suggested_runners(cores=cores, memory_bytes=memory_bytes)
+    suggested = suggested_matches_at_once(cores=cores, memory_bytes=memory_bytes)
     return f"""\
 # How this machine runs its runners, read when `sc2scala runner start` starts.
 
-# How many matches it plays at once: about {suggested} fit this machine's {cores} cores and {memory_gib:.0f} GiB of
-# memory, one per {_CORES_PER_RUNNER} cores and {_MEMORY_GIB_PER_RUNNER} GiB, for light bots. A ladder's default
-# limits let one match take up to 15 GiB.
-runners = 1
+# The most matches it may play at once, whatever its page on the server asks: by default {suggested}, which fit
+# this machine's {cores} cores and {memory_gib:.0f} GiB of memory, one per {_CORES_PER_MATCH} cores and \
+{_MEMORY_GIB_PER_MATCH} GiB, for light bots.
+# Set it lower if the machine does other work. How many it plays at once, 1 at first, and pausing it, are set on
+# your account page on the server, or by `sc2scala runner set`. A ladder's default limits let one match take up to
+# 15 GiB.
+# max_matches_at_once = {suggested}
 
 # How many GiB of bots and maps it keeps; past that, those least recently used go first.
 cache_gib = {DEFAULT_CACHE_GIB}

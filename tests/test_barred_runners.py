@@ -186,7 +186,7 @@ def test_ladder_runners_bar_runner_and_unbar_runner(
     assert line.startswith("alice/desk: 0 finished, 1 void, 0 being played, last drawn 20")
     assert ", barred since 20" in line and line.endswith(", its results void\n")
     assert main(["runner", "list"], http=ladder.server) == 0
-    assert "desk: serves every public ladder, barred from league, last seen" in capsys.readouterr().out
+    assert "; serves every public ladder, barred from league; last seen 20" in capsys.readouterr().out
     assert main(["ladder", "unbar-runner", "league", "alice/desk"], http=ladder.server) == 0
     assert capsys.readouterr().out == "alice/desk may play league again; what its bar voided stays void\n"
     with pytest.raises(SystemExit):

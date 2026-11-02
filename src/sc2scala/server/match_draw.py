@@ -1,9 +1,11 @@
-"""Drawing a match for a runner, voiding matches past their deadline, and recording a match's result."""
+"""Drawing a match for a runner, voiding matches past their deadline or lost by their runner, and recording a match's
+result."""
 
 import random
+from collections.abc import Collection
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from sc2scala.game_limits import GameLimits
@@ -118,6 +120,43 @@ def void_expired_leases(session: Session, *, now: datetime) -> None:
         .where(MatchRecord.status == LEASED, MatchRecord.deadline < now)
         .values(status=VOID, void_because="no result by the deadline", finished_at=now)
     )
+
+
+def void_leases_not_played(
+    session: Session, machine: RunnerMachine, *, playing: Collection[int], now: datetime
+) -> None:
+    """Voids the matches leased to `machine` that its runner, asking for another at `now`, does not name among those it
+    plays: it lost them, killed in a match say.
+
+    Only the leases drawn by the time the server answered the runner's previous ask go, and only if that answer went
+    out before this ask came, so that a match whose answer may still have been on its way when the runner asked
+    stays; with no previous ask, every lease was drawn for a runner of an earlier release, which no longer runs.
+    """
+    answered = machine.last_answered_at
+    if answered is not None and answered >= now:
+        return
+    lost = [MatchRecord.machine_id == machine.id, MatchRecord.status == LEASED, MatchRecord.id.not_in(playing)]
+    if answered is not None:
+        lost.append(MatchRecord.drawn_at <= answered)
+    session.execute(
+        update(MatchRecord)
+        .where(*lost)
+        .values(status=VOID, void_because="its runner no longer played it", finished_at=now)
+    )
+
+
+def leased_matches(session: Session, machine: RunnerMachine) -> list[MatchRecord]:
+    """The matches leased to `machine`, oldest first."""
+    query = select(MatchRecord).where(MatchRecord.machine_id == machine.id, MatchRecord.status == LEASED)
+    return list(session.scalars(query.order_by(MatchRecord.id)))
+
+
+def plays_fewer_than_it_may(session: Session, machine: RunnerMachine) -> bool:
+    """Whether `machine` holds fewer leases than the matches it may play at once."""
+    leased = session.scalar(
+        select(func.count()).where(MatchRecord.machine_id == machine.id, MatchRecord.status == LEASED)
+    )
+    return (leased or 0) < machine.matches_it_may_play_at_once
 
 
 def record_result(session: Session, match: MatchRecord, code: ResultCode, *, now: datetime) -> None:

@@ -103,6 +103,8 @@ td.when, th { white-space: nowrap; }
 form.row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 form.row label { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
 form.inline { display: inline; margin: 0; }
+form.row.compact { margin-top: 4px; flex-wrap: nowrap; gap: 8px; }
+form.row.compact input[type=number] { width: 4em; }
 td.actions { white-space: nowrap; }
 td.actions form + form { margin-left: 12px; }
 .notice { padding: 8px 12px; border: 1px solid var(--accent); border-radius: 6px; }

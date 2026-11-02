@@ -1,4 +1,5 @@
-"""A runner playing several matches at once, in its windows, stopping, and keeping its folders small."""
+"""A runner playing several matches at once, as many as the server says, in its windows, stopping, and keeping its
+folders small."""
 
 import dataclasses
 import os
@@ -7,6 +8,7 @@ import threading
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +17,7 @@ from sc2scala import EngineError, Match, MatchResult, MatchStoppedError, ScalaEr
 from sc2scala.runner import Runner
 from sc2scala.runner_config import PlayingSchedule, PlayingWindow
 from tests.match_helpers import LadderWithBots, ladder_with_bots
-from tests.test_runner import FakeEngine, runner_of
+from tests.test_runner import NOTHING_TO_PLAY, FakeEngine, runner_of
 
 
 @pytest.fixture
@@ -25,62 +27,111 @@ def ladder(server: TestClient) -> LadderWithBots:
 
 
 class TogetherEngine(FakeEngine):
-    """Plays a match only once `matches` are being played at once, and then stops the runner."""
+    """Plays a match only once `matches` are being played at once, and then stops the runner; as the first begins, its
+    machine's owner sets it to play that many at once."""
 
-    def __init__(self, matches: int) -> None:
+    def __init__(self, ladder: LadderWithBots, matches: int) -> None:
         super().__init__()
+        self.ladder = ladder
+        self.matches_at_once = matches
         self.together = threading.Barrier(matches, timeout=10)
         self.runner: Runner | None = None
 
     def play(self, match: Match, *, output_folder: Path) -> MatchResult:
+        if len(self.matches) == 0:
+            set_machine(self.ladder, matches_at_once=self.matches_at_once)
         self.together.wait()
         assert self.runner is not None
         self.runner.stop()
         return super().play(match, output_folder=output_folder)
 
 
-def test_two_workers_play_two_matches_at_once_and_download_each_file_once(
+def set_machine(ladder: LadderWithBots, **changes: object) -> None:
+    """Changes alice's machine `desk`, as she would on her page."""
+    response = ladder.server.patch("/api/runners/desk", headers=ladder.alice, json=changes)
+    assert response.status_code == 200, response.text
+
+
+def test_a_runner_plays_more_matches_at_once_as_soon_as_its_owner_says_and_downloads_each_file_once(
     ladder: LadderWithBots, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    engine = TogetherEngine(2)
-    runner = runner_of(ladder, engine, tmp_path)
+    engine = TogetherEngine(ladder, 2)
+    runner = runner_of(ladder, engine, tmp_path, max_matches_at_once=3)
     engine.runner = runner
     downloads: Counter[str] = Counter()
     download = runner.client.download
+    asked_naming: list[list[int]] = []
+    ask = runner.client.ask
 
     def counted_download(kind: str, sha256: str, destination: Path) -> None:
         downloads[sha256] += 1
         download(kind, sha256, destination)
 
+    def recorded_ask(**asked: Any) -> dict[str, Any]:
+        asked_naming.append(asked["playing"])
+        return ask(**asked)
+
     monkeypatch.setattr(runner.client, "download", counted_download)
-    runner.run(poll_seconds=0.01, workers=2)
+    monkeypatch.setattr(runner.client, "ask", recorded_ask)
+    runner.run(poll_seconds=0.01)
     played = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
     assert [match["status"] for match in played] == ["finished", "finished"]
     assert set(downloads.values()) == {1}
+    first = min(match["id"] for match in played)
+    assert [first] in asked_naming, "the ask that drew the second match named the first, being played"
+
+
+class PausingEngine(FakeEngine):
+    """Pauses its machine as its owner would while it plays the first match."""
+
+    def __init__(self, ladder: LadderWithBots) -> None:
+        super().__init__()
+        self.ladder = ladder
+
+    def play(self, match: Match, *, output_folder: Path) -> MatchResult:
+        set_machine(self.ladder, paused=True)
+        return super().play(match, output_folder=output_folder)
+
+
+def test_a_paused_runner_plays_its_match_to_the_end_and_takes_no_other(ladder: LadderWithBots, tmp_path: Path) -> None:
+    runner = runner_of(ladder, PausingEngine(ladder), tmp_path, max_matches_at_once=2)
+    stopping = threading.Timer(0.5, runner.stop)
+    stopping.start()
+    runner.run(poll_seconds=0.01)
+    stopping.join()
+    [played] = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
+    assert played["status"] == "finished"
+    [machine] = ladder.server.get("/api/runners", headers=ladder.alice).json()
+    assert (machine["paused"], machine["idle_because"]) == (True, "paused")
 
 
 class CountingClient:
-    """Stands in for the server's client, with nothing to play, counting the asks."""
+    """Stands in for the server's client, with nothing to play, keeping each ask."""
 
     def __init__(self) -> None:
-        self.asks = 0
+        self.asks: list[dict[str, Any]] = []
 
-    def next_match(self, *, engine: str) -> None:
-        self.asks += 1
+    def ask(self, **asked: Any) -> dict[str, Any]:
+        self.asks.append(asked)
+        return NOTHING_TO_PLAY
 
 
-def test_outside_its_windows_a_runner_asks_for_no_match_and_waits_until_stopped(tmp_path: Path) -> None:
+def test_outside_its_windows_a_runner_asks_for_no_match_saying_when_the_next_opens_until_stopped(
+    tmp_path: Path,
+) -> None:
     in_three_days = (datetime.now().weekday() + 3) % 7
     schedule = PlayingSchedule((PlayingWindow(days=frozenset({in_three_days}), start_minute=0, end_minute=1440),))
     client = CountingClient()
-    runner = Runner(client, FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path)  # type: ignore[arg-type]
-    running = threading.Thread(target=runner.run, kwargs={"poll_seconds": 0.01, "workers": 2, "schedule": schedule})
+    runner = Runner(client, FakeEngine(), cache_folder=tmp_path, work_folder=tmp_path, max_matches_at_once=2)  # type: ignore[arg-type]
+    running = threading.Thread(target=runner.run, kwargs={"poll_seconds": 0.01, "schedule": schedule})
     running.start()
     running.join(timeout=0.3)
     runner.stop()
     running.join(timeout=5)
     assert not running.is_alive()
-    assert client.asks == 0
+    assert client.asks
+    opens = schedule.next_opening(datetime.now())
+    assert {asked["next_window_opens"] for asked in client.asks} == {opens}
 
 
 class StoppingEngine(FakeEngine):
@@ -102,7 +153,7 @@ def test_a_runner_asked_to_stop_plays_its_match_to_the_end_and_takes_no_other(
     engine = StoppingEngine()
     runner = runner_of(ladder, engine, tmp_path)
     engine.runner = runner
-    runner.run(poll_seconds=0.01, workers=1)
+    runner.run(poll_seconds=0.01)
     [played] = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
     assert played["status"] == "finished"
 
@@ -125,7 +176,7 @@ def test_a_runner_stopped_now_stops_its_match_which_is_void(ladder: LadderWithBo
     engine = StoppedNowEngine()
     runner = runner_of(ladder, engine, tmp_path)
     engine.runner = runner
-    runner.run(poll_seconds=0.01, workers=1)
+    runner.run(poll_seconds=0.01)
     [played] = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
     assert (played["status"], played["void_because"]) == (
         "void",
@@ -146,9 +197,10 @@ def test_a_match_ready_too_late_to_end_by_its_deadline_is_not_played(ladder: Lad
 def test_a_failure_the_runner_did_not_foresee_voids_its_match_and_stops_it(
     ladder: LadderWithBots, tmp_path: Path
 ) -> None:
-    runner = runner_of(ladder, FakeEngine(error=RuntimeError("a bug")), tmp_path)
+    set_machine(ladder, matches_at_once=2)
+    runner = runner_of(ladder, FakeEngine(error=RuntimeError("a bug")), tmp_path, max_matches_at_once=2)
     with pytest.raises(ScalaError, match="a bug"):
-        runner.run(poll_seconds=0.01, workers=2)
+        runner.run(poll_seconds=0.01)
     played = ladder.server.get("/api/ladders/league/matches", headers=ladder.alice).json()
     reasons = {match["void_because"] for match in played}
     assert "its runner could not play it: The runner failed: RuntimeError" in reasons

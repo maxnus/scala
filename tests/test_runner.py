@@ -65,10 +65,16 @@ def ladder(server: TestClient) -> LadderWithBots:
     return ladder_with_bots(server)
 
 
-def runner_of(ladder: LadderWithBots, engine: FakeEngine, tmp_path: Path) -> Runner:
+def runner_of(ladder: LadderWithBots, engine: FakeEngine, tmp_path: Path, *, max_matches_at_once: int = 1) -> Runner:
     token = ladder.runner["Authorization"].removeprefix("Bearer ")
     client = ScalaClient("http://localhost", token, http=ladder.server)
-    return Runner(client, engine, cache_folder=tmp_path / "cache", work_folder=tmp_path / "work")
+    return Runner(
+        client,
+        engine,
+        cache_folder=tmp_path / "cache",
+        work_folder=tmp_path / "work",
+        max_matches_at_once=max_matches_at_once,
+    )
 
 
 def test_a_runner_plays_a_drawn_match_with_its_bots_unpacked_and_reports_it(
@@ -144,7 +150,9 @@ def test_runner_register_and_start_once(
     assert main(["runner", "start", "--once"], http=ladder.server, engine=engine) == 0
     assert len(engine.matches) == 1
     assert main(["runner", "list"], http=ladder.server) == 0
-    assert "laptop: serves league, last seen 20" in capsys.readouterr().out
+    listed = capsys.readouterr().out
+    assert "\nlaptop: no match to play; 1 match at once of " in listed
+    assert " allowed; serves league; last seen 20" in listed
 
 
 class LateEngine(FakeEngine):
@@ -170,6 +178,10 @@ def test_a_result_the_server_refuses_leaves_the_runner_going_and_the_folder_kept
     assert (tmp_path / "work" / f"match-{played['id']}").is_dir()
 
 
+NOTHING_TO_PLAY = {"match": None, "matches_at_once": 1, "paused": False}
+"""The server's answer to an ask when there is no match to play."""
+
+
 class UnreachableAtFirst:
     """Stands in for the server's client: unreachable at the first ask, with nothing to play after, and stops `runner`
     at the `asks_before_stop`th ask."""
@@ -179,13 +191,13 @@ class UnreachableAtFirst:
         self.asks_before_stop = asks_before_stop
         self.runner: Runner | None = None
 
-    def next_match(self, *, engine: str) -> None:
+    def ask(self, **asked: object) -> dict[str, object]:
         self.asks += 1
         if self.runner is not None and self.asks == self.asks_before_stop:
             self.runner.stop()
         if self.asks == 1:
             raise ServerError("http://localhost could not be reached: connection refused")
-        return None
+        return NOTHING_TO_PLAY
 
 
 def test_a_runner_waits_and_asks_again_when_the_server_cannot_be_reached(tmp_path: Path) -> None:
@@ -207,6 +219,14 @@ def test_runner_set_changes_what_it_is_given_alone(
     main(["runner", "register", "laptop", "--ladders", "league", "--no-public"], http=ladder.server)
     capsys.readouterr()
     main(["runner", "set", "laptop", "--ladders", "league"], http=ladder.server)
-    assert capsys.readouterr().out == "laptop: serves league\n"
+    assert capsys.readouterr().out == "laptop: never seen; 1 match at once; serves league; last seen never\n"
     main(["runner", "set", "laptop", "--public"], http=ladder.server)
-    assert capsys.readouterr().out == "laptop: serves every public ladder, and league\n"
+    assert capsys.readouterr().out == (
+        "laptop: never seen; 1 match at once; serves every public ladder, and league; last seen never\n"
+    )
+    main(["runner", "set", "laptop", "--matches-at-once", "3", "--pause"], http=ladder.server)
+    assert capsys.readouterr().out == (
+        "laptop: never seen; 3 matches at once, paused; serves every public ladder, and league; last seen never\n"
+    )
+    main(["runner", "set", "laptop", "--resume"], http=ladder.server)
+    assert "; 3 matches at once; " in capsys.readouterr().out

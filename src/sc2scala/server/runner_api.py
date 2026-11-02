@@ -1,17 +1,20 @@
 """The API runner machines call with their own tokens: a match to play, its files, and its result, and removing
-themselves."""
+themselves.
+
+A runner asks for a match at `/api/runner/ask`, from step 9 on, and is answered with its owner's settings too; one of an
+earlier release asks at `/api/runner/matches`, which leaves it as it was.
+"""
 
 import json
 import zipfile
 from dataclasses import asdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from sc2scala.engine_names import ENGINES_PLAYING_COMPUTERS
@@ -19,11 +22,21 @@ from sc2scala.errors import UploadRefusedError
 from sc2scala.game_limits import GameLimits
 from sc2scala.resource_limits import ResourceLimits
 from sc2scala.result_code import ResultCode
+from sc2scala.runner_config import MOST_MATCHES_AT_ONCE
 from sc2scala.server.bots_api import BOT_ARCHIVE_SUFFIX, BOT_ARCHIVES
 from sc2scala.server.file_store import FileStore
 from sc2scala.server.ladder_ratings import refit_after_result
 from sc2scala.server.ladders_api import MAP_FILES, computer_player
-from sc2scala.server.match_draw import LEASED, VOID, draw_match, record_result, void_expired_leases
+from sc2scala.server.match_draw import (
+    LEASED,
+    VOID,
+    draw_match,
+    leased_matches,
+    plays_fewer_than_it_may,
+    record_result,
+    void_expired_leases,
+    void_leases_not_played,
+)
 from sc2scala.server.models import MatchRecord, RunnerMachine, utc_now
 from sc2scala.server.runners_api import remove_runner_machine
 from sc2scala.server.upload_checks import MAP_SUFFIX
@@ -47,8 +60,23 @@ class FailureReport(BaseModel):
 
 
 class MatchRequest(BaseModel):
+    """How a runner of a release before step 9 asks for a match."""
+
     engine: str | None = None
     """The name of the engine the runner plays with; a runner of a release before computer opponents names none."""
+
+
+class Ask(BaseModel):
+    """What a runner says each time it asks for a match, from step 9 on."""
+
+    engine: str = Field(max_length=20)
+    playing: list[int]
+    """The matches it plays, each of them, since it asks one at a time."""
+    max_matches_at_once: int = Field(ge=1, le=MOST_MATCHES_AT_ONCE)
+    """The most it may play at once, as its machine allows."""
+    scala_version: str = Field(max_length=40)
+    next_window_opens: datetime | None = None
+    """When its next window opens, in its own time, if none is open; it takes no match then."""
 
 
 @router.delete("/machine")
@@ -59,22 +87,46 @@ def remove_this_machine(session: DatabaseSession, machine: Machine) -> dict[str,
     return {"removed": name}
 
 
+@router.post("/ask")
+def ask_for_a_match(request: Request, session: DatabaseSession, machine: Machine, ask: Ask) -> dict[str, Any]:
+    """A match drawn for the machine and leased to it, if it may play another, or none; and how many it may play at
+    once and whether it is paused, as its owner set them.
+
+    It may while it is not paused, a window of its own is open, and it plays fewer than its owner's number, at most the
+    most it allows; first, the leases it does not name as being played are void, as `void_leases_not_played` says.
+    What it says of itself is kept for its owner's page.
+    """
+    now = utc_now()
+    void_expired_leases(session, now=now)
+    void_leases_not_played(session, machine, playing=ask.playing, now=now)
+    machine.max_matches_at_once = ask.max_matches_at_once
+    machine.scala_version = ask.scala_version
+    machine.engine = ask.engine
+    machine.next_window_opens = f"{ask.next_window_opens:%Y-%m-%dT%H:%M}" if ask.next_window_opens else None
+    match = None
+    if not machine.paused and ask.next_window_opens is None and plays_fewer_than_it_may(session, machine):
+        match = _drawn_for(request, session, machine, now=now, engine=ask.engine)
+    machine.last_answered_at = utc_now()
+    session.commit()
+    return {
+        "match": match_for_runner(match) if match is not None else None,
+        "matches_at_once": machine.matches_at_once,
+        "paused": machine.paused,
+    }
+
+
 @router.post("/matches", response_model=None)
 def next_match(
     request: Request, session: DatabaseSession, machine: Machine, asked: MatchRequest | None = None
 ) -> dict[str, Any] | Response:
-    """A match drawn for the machine and leased to it, or 204 if no ladder it serves has a pair that may play; a match
-    against the computer only if the engine it names plays one."""
+    """For a runner of a release before step 9: a match drawn for the machine and leased to it, or 204 if no ladder it
+    serves has a pair that may play; a match against the computer only if the engine it names plays one.
+
+    Such a runner plays as many at once as its own file says, and is not paused.
+    """
     now = utc_now()
     void_expired_leases(session, now=now)
-    match = draw_match(
-        session,
-        machine,
-        rng=request.app.state.match_random,
-        now=now,
-        lease_margin=timedelta(seconds=request.app.state.config.lease_margin_seconds),
-        plays_computers=asked is not None and asked.engine in ENGINES_PLAYING_COMPUTERS,
-    )
+    match = _drawn_for(request, session, machine, now=now, engine=asked.engine if asked is not None else None)
     session.commit()
     if match is None:
         return Response(status_code=204)
@@ -84,7 +136,7 @@ def next_match(
 @router.get("/bots/{sha256}")
 def bot_archive(request: Request, session: DatabaseSession, machine: Machine, sha256: str) -> FileResponse:
     """A bot's zip, for a machine playing a match of it alone."""
-    leased = _leased_matches(session, machine)
+    leased = leased_matches(session, machine)
     if not any(version.sha256 == sha256 for match in leased for version in match.bot_versions):
         raise HTTPException(403, "The machine plays no match of that bot")
     file_store: FileStore = request.app.state.file_store
@@ -94,7 +146,7 @@ def bot_archive(request: Request, session: DatabaseSession, machine: Machine, sh
 @router.get("/maps/{sha256}")
 def map_file(request: Request, session: DatabaseSession, machine: Machine, sha256: str) -> FileResponse:
     """A map, for a machine playing a match on it alone."""
-    if not any(match.map_file.sha256 == sha256 for match in _leased_matches(session, machine)):
+    if not any(match.map_file.sha256 == sha256 for match in leased_matches(session, machine)):
         raise HTTPException(403, "The machine plays no match on that map")
     file_store: FileStore = request.app.state.file_store
     return FileResponse(file_store.path_of(MAP_FILES, sha256, MAP_SUFFIX), media_type="application/octet-stream")
@@ -191,9 +243,18 @@ def match_for_runner(match: MatchRecord) -> dict[str, Any]:
     }
 
 
-def _leased_matches(session: Session, machine: RunnerMachine) -> list[MatchRecord]:
-    query = select(MatchRecord).where(MatchRecord.machine_id == machine.id, MatchRecord.status == LEASED)
-    return list(session.scalars(query))
+def _drawn_for(
+    request: Request, session: Session, machine: RunnerMachine, *, now: datetime, engine: str | None
+) -> MatchRecord | None:
+    """A match drawn for the machine, which plays with `engine`, and leased to it, uncommitted; or `None`."""
+    return draw_match(
+        session,
+        machine,
+        rng=request.app.state.match_random,
+        now=now,
+        lease_margin=timedelta(seconds=request.app.state.config.lease_margin_seconds),
+        plays_computers=engine in ENGINES_PLAYING_COMPUTERS,
+    )
 
 
 def _leased_match(session: Session, machine: RunnerMachine, match_id: int) -> MatchRecord:

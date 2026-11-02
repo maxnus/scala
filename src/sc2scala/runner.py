@@ -1,4 +1,5 @@
 import os
+import queue
 import shutil
 import threading
 import zipfile
@@ -11,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from sc2scala.__about__ import __version__
 from sc2scala.bot import Bot
 from sc2scala.bot_archive import unpack_bot_archive
 from sc2scala.bot_type import BotType
@@ -29,8 +31,6 @@ _MAX_UNPACKED_BOT_BYTES = 4 * 1024 * 1024 * 1024
 _ENGINE_LOG_FOLDER_NAME = "engine"
 _MATCH_FOLDER_PREFIX = "match-"
 _CACHED_SUFFIXES = {"bots": ".zip", "maps": ".SC2Map"}
-_LONGEST_WAIT_SECONDS = 300.0
-"""How long a runner outside its windows waits before it reads the clock again, in case the clock jumped."""
 _JOIN_SECONDS = 0.2
 _START_AND_REPORT_SECONDS = 300
 """The time a match is allowed beyond its real-time limit to start and report, to end by its deadline."""
@@ -38,7 +38,8 @@ DEFAULT_KEPT_MATCH_FOLDERS = 10
 
 
 class Runner:
-    """Plays the matches a server draws for this machine with `engine`, several at once if asked, and reports each.
+    """Plays the matches a server draws for this machine with `engine`, as many at once as its owner sets on the server,
+    up to `max_matches_at_once`, and reports each.
 
     Bots and maps are downloaded once into `cache_folder`, by their hashes, and shared by the matches played at once.
     After each match, while the cache holds more than `cache_bytes`, the files least recently used go, but for those
@@ -53,6 +54,7 @@ class Runner:
         *,
         cache_folder: Path,
         work_folder: Path,
+        max_matches_at_once: int = 1,
         cache_bytes: int | None = None,
         kept_match_folders: int = DEFAULT_KEPT_MATCH_FOLDERS,
     ) -> None:
@@ -60,14 +62,19 @@ class Runner:
         self.engine = engine
         self.cache_folder = cache_folder
         self.work_folder = work_folder
+        self.max_matches_at_once = max_matches_at_once
         self.cache_bytes = cache_bytes
         self.kept_match_folders = kept_match_folders
         self._stopping = threading.Event()
         self._stopping_now = threading.Event()
+        self._ask_again = threading.Event()
         self._lock = threading.Lock()
         self._cached_files_in_use: Counter[Path] = Counter()
         self._downloads: dict[Path, threading.Lock] = {}
         self._match_folders_in_play: set[Path] = set()
+        self._playing: set[int] = set()
+        self._settings: tuple[int, bool] | None = None
+        """The matches it may play at once and whether it is paused, as the server last answered."""
         self._last_note: str | None = None
 
     @property
@@ -78,27 +85,37 @@ class Runner:
     def stop(self) -> None:
         """Takes no new match, and lets `run` return once the matches being played end. Safe in a signal handler."""
         self._stopping.set()
+        self._ask_again.set()
 
     def stop_now(self) -> None:
         """Stops the matches being played as well, which are reported unplayed, so void. Safe in a signal handler."""
-        self._stopping.set()
         self._stopping_now.set()
+        self.stop()
 
-    def run(self, *, poll_seconds: float, workers: int = 1, schedule: PlayingSchedule = ANY_HOUR) -> None:
-        """Plays up to `workers` matches at once until `stop` is called, each worker asking for a match whenever it
-        has none and a window of `schedule` is open.
+    def run(self, *, poll_seconds: float, schedule: PlayingSchedule = ANY_HOUR) -> None:
+        """Plays matches until `stop` is called, as many at once as the server says, up to `max_matches_at_once`.
 
-        A worker waits `poll_seconds` after asking in vain, the server unreachable among others, and outside the
-        windows waits for the next to open. First removes what matches cut short left, as `remove_leftovers` does.
-        Raises `ScalaError` if a worker failed in a way it did not foresee, once the others have stopped, which it asks
-        them to.
+        One thread asks for them, one ask at a time, so that each ask names every match being played; it asks again at
+        once while the server's answer leaves a match free, when a match ends, and else after `poll_seconds`, outside
+        the windows of `schedule` too, for none, so that the server sees the machine and the runner follows a change of
+        its settings. Each of `max_matches_at_once` workers plays the matches handed to it.
+
+        First removes what matches cut short left, as `remove_leftovers` does. Raises `ScalaError` if a thread failed in
+        a way it did not foresee, once the others have stopped, which it asks them to.
         """
         self.remove_leftovers()
         failures: list[Exception] = []
-        threads = [
-            threading.Thread(target=self._work, args=(poll_seconds, schedule, failures), name=f"runner-{number}")
-            for number in range(1, workers + 1)
+        offered: queue.SimpleQueue[dict[str, Any] | None] = queue.SimpleQueue()
+        workers = [
+            threading.Thread(target=self._work, args=(offered, failures), name=f"runner-{number}")
+            for number in range(1, self.max_matches_at_once + 1)
         ]
+        asking = threading.Thread(
+            target=self._ask_for_matches,
+            args=(offered, poll_seconds, schedule, len(workers), failures),
+            name="runner-asking",
+        )
+        threads = [asking, *workers]
         for thread in threads:
             thread.start()
         noted_stopping = noted_stopping_now = False
@@ -119,11 +136,118 @@ class Runner:
 
         Raises `ServerError` if the server cannot be asked, or cannot be told that a match could not be played.
         """
-        offered = self.client.next_match(engine=self.engine.name)
+        offered = self._ask(next_window_opens=None)
         if offered is None:
-            self._note("No match to play")
             return False
-        self._last_note = None
+        try:
+            return self._play_in_its_folder(offered)
+        finally:
+            self._played(offered)
+
+    def _ask_for_matches(
+        self,
+        offered: queue.SimpleQueue[dict[str, Any] | None],
+        poll_seconds: float,
+        schedule: PlayingSchedule,
+        workers: int,
+        failures: list[Exception],
+    ) -> None:
+        """Asks for matches until the runner stops, and hands each to the workers, then tells each worker to stop."""
+        try:
+            while not self._stopping.is_set():
+                self._ask_again.clear()
+                opening = schedule.next_opening(datetime.now())
+                if opening is not None:
+                    self._note(f"No playing window is open; the next opens {opening:%a %H:%M}")
+                try:
+                    match = self._ask(next_window_opens=opening)
+                except ServerError as error:
+                    logger.error(f"Asking the server failed, and is tried again in {poll_seconds:.0f} s: {error}")
+                    match = None
+                if match is not None:
+                    offered.put(match)
+                    if self._may_play_another():
+                        continue
+                wait = poll_seconds if opening is None else min(poll_seconds, _seconds_until(opening))
+                self._ask_again.wait(wait)
+        except Exception as error:
+            logger.exception("Asking for matches failed")
+            failures.append(error)
+            self.stop()
+        finally:
+            for _ in range(workers):
+                offered.put(None)
+
+    def _ask(self, *, next_window_opens: datetime | None) -> dict[str, Any] | None:
+        """Asks the server for a match, naming those being played, and follows its answer; returns the match it
+        leased, counted among those played from now on, or `None`."""
+        with self._lock:
+            playing = sorted(self._playing)
+        answer = self.client.ask(
+            engine=self.engine.name,
+            playing=playing,
+            max_matches_at_once=self.max_matches_at_once,
+            scala_version=__version__,
+            next_window_opens=next_window_opens,
+        )
+        self._follow(matches_at_once=answer["matches_at_once"], paused=answer["paused"])
+        match = answer["match"]
+        if match is None:
+            if not answer["paused"] and next_window_opens is None:
+                self._note("No match to play")
+            return None
+        with self._lock:
+            self._playing.add(match["id"])
+            self._last_note = None
+        return match
+
+    def _follow(self, *, matches_at_once: int, paused: bool) -> None:
+        """Takes the server's settings, and says when they change."""
+        settings = (min(matches_at_once, self.max_matches_at_once), paused)
+        with self._lock:
+            changed, self._settings = settings != self._settings, settings
+        if not changed:
+            return
+        if paused:
+            logger.info("Paused on the server: taking no new match, and playing those being played to their end")
+            return
+        allowed = f"; it asks for {matches_at_once}, but this machine allows {self.max_matches_at_once}"
+        logger.info(
+            f"Plays up to {_matches(settings[0])} at once, as the server says"
+            + (allowed if matches_at_once > self.max_matches_at_once else "")
+        )
+
+    def _may_play_another(self) -> bool:
+        """Whether the server's last answer leaves room for another match beside those being played."""
+        with self._lock:
+            return self._settings is not None and not self._settings[1] and len(self._playing) < self._settings[0]
+
+    def _work(self, offered: queue.SimpleQueue[dict[str, Any] | None], failures: list[Exception]) -> None:
+        """One worker's matches, played one after the other as they are handed to it, until it is told to stop.
+
+        A failure it did not foresee stops the runner, and the worker goes on taking what it is handed, each reported
+        unplayed since the runner is stopping, so that no match handed over is left leased.
+        """
+        while (match := offered.get()) is not None:
+            try:
+                self._play_in_its_folder(match)
+            except ServerError as error:
+                logger.error(f"Match {match['id']}: telling the server it could not be played failed: {error}")
+            except Exception as error:
+                logger.exception(f"{threading.current_thread().name} failed")
+                failures.append(error)
+                self.stop()
+            finally:
+                self._played(match)
+
+    def _played(self, match: dict[str, Any]) -> None:
+        """Counts `match` played no more, and has the runner ask again, since a match may be free."""
+        with self._lock:
+            self._playing.discard(match["id"])
+        self._ask_again.set()
+
+    def _play_in_its_folder(self, offered: dict[str, Any]) -> bool:
+        """Plays and reports `offered` in a folder of its own; returns whether the server took a result."""
         match_folder = self.work_folder / f"{_MATCH_FOLDER_PREFIX}{offered['id']}"
         with self._lock:
             self._match_folders_in_play.add(match_folder)
@@ -133,27 +257,6 @@ class Runner:
             with self._lock:
                 self._match_folders_in_play.discard(match_folder)
             self._prune()
-
-    def _work(self, poll_seconds: float, schedule: PlayingSchedule, failures: list[Exception]) -> None:
-        """One worker's matches, played one after the other until the runner stops."""
-        try:
-            while not self._stopping.is_set():
-                opening = schedule.next_opening(datetime.now())
-                if opening is not None:
-                    self._note(f"No playing window is open; the next opens {opening:%a %H:%M}")
-                    self._stopping.wait(min(_seconds_until(opening), _LONGEST_WAIT_SECONDS))
-                    continue
-                try:
-                    played = self.play_next()
-                except ServerError as error:
-                    logger.error(f"Asking the server failed, and is tried again in {poll_seconds:.0f} s: {error}")
-                    played = False
-                if not played:
-                    self._stopping.wait(poll_seconds)
-        except Exception as error:
-            logger.exception(f"{threading.current_thread().name} failed")
-            failures.append(error)
-            self.stop()
 
     def _play(self, offered: dict[str, Any], match_folder: Path) -> bool:
         description = f"Match {offered['id']} in {offered['ladder']}, " + " vs ".join(
@@ -307,6 +410,10 @@ class Runner:
                 return
             self._last_note = message
         logger.info(message)
+
+
+def _matches(count: int) -> str:
+    return f"{count} {'match' if count == 1 else 'matches'}"
 
 
 def _computer_from(player: dict[str, Any]) -> Computer:

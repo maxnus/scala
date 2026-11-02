@@ -3,6 +3,7 @@ import json
 import uuid
 from collections.abc import Sequence
 from contextlib import ExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -155,8 +156,23 @@ class ScalaClient:
     def my_machines(self) -> list[dict[str, Any]]:
         return self._request("GET", "/api/runners")
 
-    def change_machine(self, name: str, *, serves_public: bool | None, ladders: Sequence[str] | None) -> dict[str, Any]:
-        changes = {"serves_public": serves_public, "ladders": list(ladders) if ladders is not None else None}
+    def change_machine(
+        self,
+        name: str,
+        *,
+        serves_public: bool | None = None,
+        ladders: Sequence[str] | None = None,
+        matches_at_once: int | None = None,
+        paused: bool | None = None,
+    ) -> dict[str, Any]:
+        """Changes the user's machine, each setting given: what it serves, how many matches it plays at once, and
+        whether it is paused."""
+        changes = {
+            "serves_public": serves_public,
+            "ladders": list(ladders) if ladders is not None else None,
+            "matches_at_once": matches_at_once,
+            "paused": paused,
+        }
         return self._request("PATCH", f"/api/runners/{name}", json=changes)
 
     def remove_machine(self, name: str) -> dict[str, Any]:
@@ -179,9 +195,29 @@ class ScalaClient:
     def unbar_runner(self, ladder: str, runner: str) -> dict[str, Any]:
         return self._request("DELETE", f"/api/ladders/{ladder}/barred-runners/{runner}")
 
-    def next_match(self, *, engine: str) -> dict[str, Any] | None:
-        """A match for this runner machine to play with `engine`, the engine's name, or `None` if there is none."""
-        return self._request("POST", "/api/runner/matches", json={"engine": engine})
+    def ask(
+        self,
+        *,
+        engine: str,
+        playing: Sequence[int],
+        max_matches_at_once: int,
+        scala_version: str,
+        next_window_opens: datetime | None,
+    ) -> dict[str, Any]:
+        """Asks for a match for this runner machine to play with `engine`, the engine's name, saying the matches it
+        plays, the most it allows at once, its Scala, and when its next window opens if none is open.
+
+        Answers with `match`, the match leased to it or `None`, and its owner's settings, `matches_at_once` and
+        `paused`.
+        """
+        asked = {
+            "engine": engine,
+            "playing": list(playing),
+            "max_matches_at_once": max_matches_at_once,
+            "scala_version": scala_version,
+            "next_window_opens": next_window_opens.isoformat(timespec="minutes") if next_window_opens else None,
+        }
+        return self._request("POST", "/api/runner/ask", json=asked)
 
     def download(self, kind: str, sha256: str, destination: Path) -> None:
         """Downloads the runner's file of `kind`, `bots` or `maps`, to `destination`, and checks its SHA-256.

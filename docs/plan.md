@@ -203,17 +203,19 @@ The server holds all four, and applies them when the runner asks for a match: it
 time than its number, and none while it is paused or outside its windows. A change in the pages thus reaches the runner
 at its next ask, within the 30 s an idle runner waits between asks, with no restart; lowering the number, pausing, or a
 window closing lets the matches being played end, which the real-time limit bounds. Every answer, a match or none,
-carries the machine's number and whether it may play now, paused or outside its windows. The runner keeps as many
-workers as the machine allows, lets ask only as many as the number leaves free, and wakes the others when an answer
-frees more; with none free, one asks every 30 s for nothing but the answer, and a runner playing as many as it may
-still asks each minute, so that its page shows it seen. Each ask says:
+carries the machine's number and whether it is paused. One thread of the runner asks, one ask at a time, and hands each
+match to one of as many workers as the machine allows: at once again while the answer leaves a match free, when a
+match ends, and else every 30 s, while it plays as many as it may or is outside its windows too, for no match, so that
+it follows a change and its page shows it seen. Each ask says:
 
 - **the matches the runner plays**, so that the server voids a lease the runner no longer plays, as when it was killed
-  in a match, rather than count it against the machine's number until its deadline. The runner asks one at a time, so
-  that an ask names every match it plays, and the server voids only a lease drawn before the runner's previous ask was
-  answered, so that a lease whose answer is still on its way is never voided;
-- **the machine's local time**, in which the server reads its windows, keeping the latest for the page; a machine that
-  never asked shows its windows without a next opening;
+  in a match, rather than count it against the machine's number until its deadline. Since the runner asks one at a
+  time, an ask names every match it plays, and the server voids only a lease drawn by the time it answered the previous
+  ask, and only if that answer went out before this ask came, so that a lease whose answer may still be on its way is
+  never voided;
+- **when its next window opens**, in its own time, if none is open, while its windows are in its file, which the page
+  shows; from 9b, **the machine's local time** instead, in which the server reads its windows, keeping the latest for
+  the page, where a machine that never asked shows its windows without a next opening;
 - **the most it allows, its Scala and its engine**, which the page shows.
 
 What is the machine's alone stays in a file beside its token: the most matches it may play at once, one per 4 cores and
@@ -226,14 +228,13 @@ max_matches_at_once = 4
 cache_gib = 20
 ```
 
-The account page shows, for each machine, the matches it plays now, each linked to its page, or why it plays none:
-paused, outside its windows until the next opens, no match to play, or not seen for 5 minutes, five of the asks it
-makes at least each minute; and the most it allows, its Scala and its engine, as of its last ask. A runner of a release
+The account page shows, for each machine, the matches it plays now, each linked to its page, or why it plays none: never
+seen, not seen in the last 5 minutes, ten of the asks it makes every 30 s, paused, outside its windows until the next
+opens, or no match to play; and the most it allows, its Scala and its engine, as of its last ask. A runner of a release
 before step 9 names no matches when it asks; the server leaves it as it was, playing as many at once as its file's
 `runners` says, in its file's windows, until it is updated. An updated runner reads its file's `runners` no more from
-9a, and its windows no more from 9b, and says so as it starts. Only the owner's
-max-9950 runs a runner yet, 1 match at once at any hour, so every machine starts so on the server, and no file's
-settings are carried there.
+9a, and its windows no more from 9b, and says so as it starts. Only the owner's max-9950 runs a runner yet, 1 match at
+once at any hour, so every machine starts so on the server, and no file's settings are carried there.
 
 A match that is ready to start too late to end by its deadline, with 5 minutes to start and report, its bots slow to
 download say, is reported unplayed rather than started. `sc2scala runner stop`, or SIGTERM, as systemd sends, stops the
@@ -484,13 +485,14 @@ Each step ends in something that runs, and is a pull request of its own.
      v0.9.0, as [the engine](#the-engine) says.
 9. **A runner's controls in the pages**, as decision 13 and [runners](#runners) say, in two pull requests, apart from
    8c, before or after it:
-   - 9a: how many matches a machine plays at once, pausing and resuming it, and what it plays now, on the account page
-     and by `sc2scala runner set` and `runner list`; the server leasing it no more matches than its number, and voiding
-     the leases its runner no longer plays; the runner naming its matches, the most it allows, its Scala and its
-     engine when it asks, and following a change with no restart; `max_matches_at_once` in `runner.toml`, where its
-     windows stay until 9b; and the README and the guides, [WSL2](wsl2.md)'s among them, sending people to the page
-     rather than to the file. Tried on max-9950 while it plays test-ladder: its number raised and lowered, and it paused
-     and resumed, from the page.
+   - 9a, built: how many matches a machine plays at once, pausing and resuming it, and what it plays now, on the
+     account page and by `sc2scala runner set` and `runner list`; the server leasing it no more matches than its number,
+     and voiding the leases its runner no longer plays; the runner asking at `/api/runner/ask`, naming its matches, the
+     most it allows, its Scala and its engine, and when its next window opens, and following a change with no restart;
+     `max_matches_at_once` in `runner.toml`, where its windows stay until 9b; and the README and the guides,
+     [WSL2](wsl2.md)'s among them, sending people to the page rather than to the file. A runner of an earlier release
+     asks at `/api/runner/matches` as before. To be tried on max-9950 once the public server runs it, while it plays
+     test-ladder: its number raised and lowered, and it paused and resumed, from the page.
    - 9b: its windows in the pages too, read by the server in the machine's local time, which each ask gives.
 
 ## Open

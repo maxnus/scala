@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -26,7 +27,7 @@ from sc2scala.runner_config import (
     default_config_text,
     default_runner_config_file,
     machine_cores_and_memory,
-    suggested_runners,
+    suggested_matches_at_once,
 )
 from sc2scala.runner_credentials import RunnerCredentials, default_runner_file
 from sc2scala.runner_lock import RunnerLock, running_runner
@@ -56,7 +57,8 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
         help="register this computer as a runner machine of yours",
         description="Registers this computer as a runner machine of yours, on the server you are signed in to, or by "
         "a setup code from the server's Add a runner page, which needs no sign-in and says which ladders it serves; "
-        "and writes its settings, how many matches it plays at once and when, if it has none.",
+        "and writes its settings, the most matches it may play at once and when it plays, if it has none. It plays 1 "
+        "match at once at first: `runner set` and your account page change that, and pause it.",
     )
     register.add_argument(
         "name",
@@ -75,15 +77,28 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
         help="with --setup-code, make your machine of this name this computer, as when it is set up again",
     )
     change = commands.add_parser(
-        "set", help="change the ladders a machine of yours serves", description="Changes what it is given alone."
+        "set",
+        help="change how many matches a machine of yours plays at once, pause it, or change the ladders it serves",
+        description="Changes what it is given alone. Its runner follows within 30 s, with no restart; fewer matches "
+        "at once, or a pause, lets the matches being played end.",
     )
     change.add_argument("name")
     change.add_argument("--server", help="the server (default: the last one signed in to)")
+    change.add_argument(
+        "--matches-at-once", type=int, metavar="N", help="how many matches it plays at once, up to the most it allows"
+    )
+    pausing = change.add_mutually_exclusive_group()
+    pausing.add_argument(
+        "--pause", action="store_true", default=None, dest="paused", help="take no new match until resumed"
+    )
+    pausing.add_argument("--resume", action="store_false", dest="paused", help="take matches again")
     change.add_argument("--ladders", nargs="*", metavar="LADDER", help="the ladders to serve, in place of the listed")
     public = change.add_mutually_exclusive_group()
     public.add_argument("--public", action="store_true", default=None, help="serve every public ladder")
     public.add_argument("--no-public", action="store_false", dest="public", help="serve no ladder but those listed")
-    machines = commands.add_parser("list", help="list your runner machines")
+    machines = commands.add_parser(
+        "list", help="list your runner machines, and what each plays now", description="Lists your runner machines."
+    )
     machines.add_argument("--server", help="the server (default: the last one signed in to)")
     remove = commands.add_parser(
         "remove",
@@ -97,8 +112,9 @@ def add_runner_commands(add_parser: Callable[..., argparse.ArgumentParser]) -> N
         "start",
         help="play matches on this computer",
         description="Downloads the engine's images if missing, then plays the matches the server draws, as many at "
-        "once and when the runner's settings say, in runner.toml beside its token. SIGTERM or Ctrl-C stops it once "
-        "the matches being played end; a second Ctrl-C stops them as well, as SIGQUIT does.",
+        "once as your account page on the server says, up to the most runner.toml beside its token allows, and when "
+        "runner.toml says. SIGTERM or Ctrl-C stops it once the matches being played end; a second Ctrl-C stops them "
+        "as well, as SIGQUIT does.",
     )
     start.add_argument("--once", action="store_true", help="ask for one match, play it if there is one, and stop")
     start.add_argument(
@@ -130,12 +146,17 @@ def run_runner_command(args: argparse.Namespace, *, http: httpx.Client | None, e
             _register(args, http=http)
         case "set":
             client = signed_in_client(args.server, http=http)
-            changed = client.change_machine(args.name, serves_public=args.public, ladders=args.ladders)
-            print(f"{changed['name']}: {_serving(changed)}")
+            changed = client.change_machine(
+                args.name,
+                serves_public=args.public,
+                ladders=args.ladders,
+                matches_at_once=args.matches_at_once,
+                paused=args.paused,
+            )
+            print(_described(changed))
         case "list":
             for machine in signed_in_client(args.server, http=http).my_machines():
-                barred = f", barred from {', '.join(machine['barred_from'])}" if machine["barred_from"] else ""
-                print(f"{machine['name']}: {_serving(machine)}{barred}, last seen {machine['last_seen_at'] or 'never'}")
+                print(_described(machine))
         case "remove":
             if args.name is None:
                 return _remove_this_machine(http=http)
@@ -170,14 +191,14 @@ def _register(args: argparse.Namespace, *, http: httpx.Client | None) -> None:
     RunnerCredentials(server_url=client.server_url, machine=machine["name"], token=machine["token"]).save()
     print(f"This computer is {machine['owner']}/{machine['name']} on {client.server_url}: {_serving(machine)}")
     print(f"Its token is kept in {default_runner_file()}")
-    cores, memory_bytes = machine_cores_and_memory()
     if not config_file.exists():
+        cores, memory_bytes = machine_cores_and_memory()
         config_file.write_text(default_config_text(cores=cores, memory_bytes=memory_bytes), encoding="utf-8")
     config = RunnerConfig.load(config_file)
     print(
-        f"It plays {_matches(config.runners)} at once, "
-        f"{'in its windows' if config.schedule.windows else 'at any hour'}, as {config_file} says; "
-        f"about {suggested_runners(cores=cores, memory_bytes=memory_bytes)} fit this computer"
+        f"It plays {_matches(machine.get('matches_at_once', 1))} at once, up to {_most_matches_at_once(config)} "
+        f"as {config_file} allows, {'in its windows' if config.schedule.windows else 'at any hour'}; "
+        f"{client.server_url}/account and `sc2scala runner set` change how many, and pause it"
     )
     print("Run `sc2scala runner start`, or `sc2scala runner service` to run it as a service")
 
@@ -242,21 +263,32 @@ def _start(args: argparse.Namespace, *, http: httpx.Client | None, engine: Match
             configured_engine = engine_named(config.engine)
             configured_engine.pull_images(log_file=work_folder / "pull.log")
             engine = configured_engine
+        max_matches_at_once = _most_matches_at_once(config)
         runner = Runner(
-            client, engine, cache_folder=_cache_home(), work_folder=work_folder, cache_bytes=config.cache_bytes
+            client,
+            engine,
+            cache_folder=_cache_home(),
+            work_folder=work_folder,
+            max_matches_at_once=max_matches_at_once,
+            cache_bytes=config.cache_bytes,
         )
         if args.once:
             runner.remove_leftovers()
             runner.play_next()
             return
+        if config.runners is not None:
+            logger.warning(
+                f"runner.toml's runners = {config.runners} is read no more: {credentials.server_url}/account sets how "
+                "many matches this machine plays at once, up to its max_matches_at_once"
+            )
         logger.info(
-            f"{credentials.machine} plays up to {_matches(config.runners)} at once for {credentials.server_url}, "
-            f"with {ENGINE_TITLES.get(engine.name, engine.name)}. "
+            f"{credentials.machine} plays for {credentials.server_url}, as many matches at once as its page there "
+            f"says, up to {max_matches_at_once}, with {ENGINE_TITLES.get(engine.name, engine.name)}. "
             "Ctrl-C or `sc2scala runner stop` stops it once the matches being played end; a second Ctrl-C, or "
             "`runner stop --now`, stops them too"
         )
         with _stopped_by_signals(runner):
-            runner.run(poll_seconds=args.poll_seconds, workers=config.runners, schedule=config.schedule)
+            runner.run(poll_seconds=args.poll_seconds, schedule=config.schedule)
 
 
 @contextmanager
@@ -379,6 +411,30 @@ def _serving(machine: dict[str, object]) -> str:
     if machine["serves_public"]:
         return "serves every public ladder" + (f", and {named}" if named else "")
     return f"serves {named}" if named else "serves no ladder"
+
+
+def _described(machine: dict[str, Any]) -> str:
+    """A machine as `runner list` shows it: what it plays now, or why nothing, how many at once, what it serves, and
+    when it was last seen."""
+    playing = machine.get("playing") or []
+    now = f"plays {', '.join(f'match {match}' for match in playing)}" if playing else machine.get("idle_because")
+    allowed = machine.get("max_matches_at_once")
+    at_once = f"{_matches(machine.get('matches_at_once', 1))} at once" + (f" of {allowed} allowed" if allowed else "")
+    if machine.get("paused") and now != "paused":
+        at_once += ", paused"
+    if machine.get("last_seen_at") and not machine.get("follows_its_controls", True):
+        at_once += " (its runner predates these settings)"
+    barred = f", barred from {', '.join(machine['barred_from'])}" if machine.get("barred_from") else ""
+    seen = machine.get("last_seen_at") or "never"
+    return f"{machine['name']}: {now}; {at_once}; {_serving(machine)}{barred}; last seen {seen}"
+
+
+def _most_matches_at_once(config: RunnerConfig) -> int:
+    """The most matches this computer may play at once: as its config says, or as many as suggested for it."""
+    if config.max_matches_at_once is not None:
+        return config.max_matches_at_once
+    cores, memory_bytes = machine_cores_and_memory()
+    return suggested_matches_at_once(cores=cores, memory_bytes=memory_bytes)
 
 
 def _matches(count: int) -> str:

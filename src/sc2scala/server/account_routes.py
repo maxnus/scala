@@ -6,11 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from sc2scala.api_tokens import hash_of_token, new_token
+from sc2scala.engine_names import ENGINE_TITLES
 from sc2scala.race import Race
+from sc2scala.runner_config import MOST_MATCHES_AT_ONCE
 from sc2scala.server.bots_api import bots_of
 from sc2scala.server.ladder_runners_api import barred_from
 from sc2scala.server.ladders_api import visible_ladders
-from sc2scala.server.models import ApiToken, Ladder, RunnerMachine, User
+from sc2scala.server.models import ApiToken, Ladder, RunnerMachine, User, utc_now
+from sc2scala.server.runners_api import machine_status
 from sc2scala.server.web import DatabaseSession, check_csrf, render, required_user
 
 router = APIRouter()
@@ -68,6 +71,7 @@ def _render_account(request: Request, session: Session, user: User, **context: A
     )
     servable_ladders = visible_ladders(session, user)
     own_ladders = list(session.scalars(select(Ladder).where(Ladder.owner_id == user.id).order_by(Ladder.name)))
+    now = utc_now()
     return render(
         request,
         "account.html",
@@ -76,6 +80,9 @@ def _render_account(request: Request, session: Session, user: User, **context: A
         own_ladders=own_ladders,
         machines=machines,
         barred_from={machine.id: barred_from(session, machine) for machine in machines},
+        statuses={machine.id: machine_status(session, machine, now=now) for machine in machines},
+        engine_titles=ENGINE_TITLES,
+        most_matches_at_once=MOST_MATCHES_AT_ONCE,
         servable_ladders=servable_ladders,
         races=list(Race),
         **context,

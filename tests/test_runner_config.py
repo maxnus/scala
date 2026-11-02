@@ -9,13 +9,13 @@ from sc2scala.runner_config import (
     RunnerConfig,
     RunnerConfigError,
     default_config_text,
-    suggested_runners,
+    suggested_matches_at_once,
 )
 
 _GIBIBYTE = 1024**3
 
 _NIGHTS_AND_WEEKENDS = """\
-runners = 4
+max_matches_at_once = 4
 cache_gib = 50.5
 
 [[window]]
@@ -42,16 +42,21 @@ def at(text: str) -> datetime:
     return datetime(2026, 10, 26, int(hour), int(minute)) + timedelta(days=days_ahead)
 
 
-def test_a_machine_with_no_config_plays_one_match_at_a_time_at_any_hour(tmp_path: Path) -> None:
+def test_a_machine_with_no_config_allows_as_many_matches_as_suggested_at_any_hour(tmp_path: Path) -> None:
     config = RunnerConfig.load(tmp_path / "missing.toml")
-    assert (config.runners, config.cache_gib, config.schedule) == (1, 20, PlayingSchedule())
+    assert (config.max_matches_at_once, config.cache_gib, config.schedule) == (None, 20, PlayingSchedule())
     assert config.schedule.next_opening(at("Wed 12:00")) is None
 
 
-def test_a_config_sets_the_runners_the_cache_and_the_windows(tmp_path: Path) -> None:
+def test_a_config_sets_the_most_matches_at_once_the_cache_and_the_windows(tmp_path: Path) -> None:
     config = config_of(tmp_path, _NIGHTS_AND_WEEKENDS)
-    assert (config.runners, config.cache_bytes) == (4, int(50.5 * _GIBIBYTE))
+    assert (config.max_matches_at_once, config.cache_bytes) == (4, int(50.5 * _GIBIBYTE))
     assert len(config.schedule.windows) == 2
+
+
+def test_the_runners_of_a_release_before_step_9_are_kept_only_to_say_they_are_read_no_more(tmp_path: Path) -> None:
+    config = config_of(tmp_path, "runners = 3")
+    assert (config.runners, config.max_matches_at_once) == (3, None)
 
 
 @pytest.mark.parametrize(
@@ -97,6 +102,10 @@ def test_days_are_listed_and_ranged_and_a_toml_time_is_a_time(tmp_path: Path) ->
 @pytest.mark.parametrize(
     ("text", "complaint"),
     [
+        ("max_matches_at_once = 0", "max_matches_at_once is a whole number from 1 to 100"),
+        ("max_matches_at_once = 101", "max_matches_at_once is a whole number from 1 to 100"),
+        ('max_matches_at_once = "4"', "max_matches_at_once is a whole number from 1 to 100"),
+        ("max_matches_at_once = true", "max_matches_at_once is a whole number from 1 to 100"),
         ("runners = 0", "runners is a whole number"),
         ('runners = "4"', "runners is a whole number"),
         ("runners = true", "runners is a whole number"),
@@ -125,13 +134,13 @@ def test_a_config_that_does_not_fit_is_refused_naming_its_file(tmp_path: Path, t
 
 def test_the_config_register_writes_holds_the_defaults_and_an_example_that_reads(tmp_path: Path) -> None:
     text = default_config_text(cores=32, memory_bytes=59 * _GIBIBYTE)
-    assert "about 7 fit this machine's 32 cores and 59 GiB of\n# memory" in text
+    assert "by default 7, which fit\n# this machine's 32 cores and 59 GiB of memory" in text
     assert config_of(tmp_path, text) == RunnerConfig()
     uncommented = "\n".join(
         line.removeprefix("# ") if "=" in line or "[[" in line else line for line in text.splitlines()
     )
     example = config_of(tmp_path, "\n".join(_NIGHTS_AND_WEEKENDS.splitlines()[3:]))
-    assert config_of(tmp_path, uncommented) == replace(example, engine="scala")
+    assert config_of(tmp_path, uncommented) == replace(example, engine="scala", max_matches_at_once=7)
 
 
 def test_the_engine_is_ai_arena_s_unless_scala_s_is_named(tmp_path: Path) -> None:
@@ -139,6 +148,10 @@ def test_the_engine_is_ai_arena_s_unless_scala_s_is_named(tmp_path: Path) -> Non
     assert config_of(tmp_path, 'engine = "scala"').engine == "scala"
 
 
-@pytest.mark.parametrize(("cores", "memory_gib", "runners"), [(32, 59, 7), (32, 128, 8), (8, 16, 2), (2, 4, 1)])
-def test_one_runner_is_suggested_per_4_cores_and_8_gib(cores: int, memory_gib: int, runners: int) -> None:
-    assert suggested_runners(cores=cores, memory_bytes=memory_gib * _GIBIBYTE) == runners
+@pytest.mark.parametrize(
+    ("cores", "memory_gib", "matches"), [(32, 59, 7), (32, 128, 8), (8, 16, 2), (2, 4, 1), (1024, 4096, 100)]
+)
+def test_one_match_at_once_is_suggested_per_4_cores_and_8_gib_up_to_100(
+    cores: int, memory_gib: int, matches: int
+) -> None:
+    assert suggested_matches_at_once(cores=cores, memory_bytes=memory_gib * _GIBIBYTE) == matches

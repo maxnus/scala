@@ -288,7 +288,12 @@ runner_machine_ladders = Table(
 
 class RunnerMachine(Base):
     """A machine whose runners play matches for its owner: every public ladder if `serves_public`, and the ladders it
-    lists, a protected one only while its owner is a member. It acts by a token of its own, kept as its hash."""
+    lists, a protected one only while its owner is a member. It acts by a token of its own, kept as its hash.
+
+    Its owner sets how many matches it plays at once, `matches_at_once`, and pauses it; its runner says, each time it
+    asks for a match, the most it allows, its Scala and its engine, and when its next window opens if none is open. A
+    runner of a release before these controls says none of them, and plays as its own file says.
+    """
 
     __tablename__ = "runner_machines"
     __table_args__ = (UniqueConstraint("owner_id", "name"),)
@@ -300,6 +305,16 @@ class RunnerMachine(Base):
     serves_public: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    matches_at_once: Mapped[int] = mapped_column(default=1)
+    paused: Mapped[bool] = mapped_column(default=False)
+    max_matches_at_once: Mapped[int | None]
+    scala_version: Mapped[str | None] = mapped_column(String(40))
+    engine: Mapped[str | None] = mapped_column(String(20))
+    next_window_opens: Mapped[str | None] = mapped_column(String(16))
+    """When its next window opens, in its own time, as "2026-11-02T23:00", if none was open when its runner last
+    asked."""
+    last_answered_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    """When the server last answered its runner's ask, with every match leased to it by then."""
 
     owner: Mapped[User] = relationship()
     ladders: Mapped[list[Ladder]] = relationship(secondary=runner_machine_ladders, order_by=Ladder.name)
@@ -308,6 +323,17 @@ class RunnerMachine(Base):
     def runner_name(self) -> str:
         """The machine as `owner/name`."""
         return f"{self.owner.login}/{self.name}"
+
+    @property
+    def matches_it_may_play_at_once(self) -> int:
+        """Its owner's number, but no more than its runner allows, once it said."""
+        return min(self.matches_at_once, self.max_matches_at_once or self.matches_at_once)
+
+    @property
+    def follows_its_controls(self) -> bool:
+        """Whether its runner, as of its last ask, is of a release that follows its owner's number and pause, which
+        one before step 9 does not."""
+        return self.scala_version is not None
 
 
 runner_setup_code_ladders = Table(
